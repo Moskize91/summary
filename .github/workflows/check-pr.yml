@@ -1,0 +1,35 @@
+name: check-pr
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+
+      - name: Run pyright checking
+        run: |
+          pyright src tests
+
+      - name: Run linting
+        run: |
+          pylint ./src/**/*.py ./tests/**/*.py
+
+      - name: Run tests
+        run: |
+          python test.py
