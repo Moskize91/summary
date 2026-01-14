@@ -1,6 +1,7 @@
-"""LLM client with logging support."""
+"""LLM client with logging and caching support."""
 
 import datetime
+import hashlib
 import json
 import threading
 from io import StringIO
@@ -19,12 +20,13 @@ _LOGGER_SUFFIX_ID: int = 1
 
 
 class LLM:
-    """LLM client with configuration, logging, and retry support."""
+    """LLM client with configuration, logging, caching, and retry support."""
 
     def __init__(
         self,
         config_path: Path,
         log_dir_path: Path | None = None,
+        cache_dir_path: Path | None = None,
         retry_times: int = 5,
         retry_interval_seconds: float = 6.0,
     ):
@@ -33,6 +35,7 @@ class LLM:
         Args:
             config_path: Path to the configuration JSON file
             log_dir_path: Directory path for saving logs
+            cache_dir_path: Directory path for caching responses
             retry_times: Number of retry attempts on failure
             retry_interval_seconds: Wait time between retries
         """
@@ -51,8 +54,9 @@ class LLM:
         self.retry_times = retry_times
         self.retry_interval_seconds = retry_interval_seconds
 
-        # Setup logging
+        # Setup logging and caching
         self._log_dir_path = self._ensure_dir_path(log_dir_path)
+        self._cache_dir_path = self._ensure_dir_path(cache_dir_path)
 
     def _ensure_dir_path(self, path: Path | None) -> Path | None:
         """Ensure directory exists and return resolved path."""
@@ -116,6 +120,34 @@ class LLM:
         retry_keywords = ["connection", "timeout", "network", "rate limit"]
         return any(keyword in error_str for keyword in retry_keywords)
 
+    def _compute_cache_key(
+        self,
+        system_prompt: str,
+        user_message: str,
+        temperature: float | None,
+        top_p: float | None,
+    ) -> str:
+        """Compute cache key from request parameters.
+
+        Args:
+            system_prompt: System prompt
+            user_message: User message
+            temperature: Temperature parameter
+            top_p: Top-p parameter
+
+        Returns:
+            SHA512 hash as cache key
+        """
+        cache_data = {
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "temperature": temperature,
+            "top_p": top_p,
+            "model": self.model,
+        }
+        cache_json = json.dumps(cache_data, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha512(cache_json.encode("utf-8")).hexdigest()
+
     def request(
         self,
         system_prompt: str,
@@ -123,7 +155,7 @@ class LLM:
         temperature: float | None = None,
         top_p: float | None = None,
     ) -> str | None:
-        """Send a request to the LLM with retry logic and logging.
+        """Send a request to the LLM with retry logic, logging, and caching.
 
         Args:
             system_prompt: System prompt for the LLM
@@ -137,6 +169,21 @@ class LLM:
         temperature = temperature if temperature is not None else self.temperature
         top_p = top_p if top_p is not None else self.top_p
 
+        # Check cache first
+        cache_key = None
+        if self._cache_dir_path is not None:
+            cache_key = self._compute_cache_key(
+                system_prompt,
+                user_message,
+                temperature,
+                top_p,
+            )
+            cache_file = self._cache_dir_path / f"{cache_key}.txt"
+            if cache_file.exists():
+                cached_response = cache_file.read_text(encoding="utf-8")
+                print(f"[Cache Hit] Using cached response (key: {cache_key[:12]}...)")
+                return cached_response
+
         logger = self._create_logger()
         response: str = ""
         last_error: Exception | None = None
@@ -144,7 +191,10 @@ class LLM:
 
         # Log request parameters and messages
         if logger is not None:
-            logger.debug("[[Parameters]]:\n\ttemperature=%s\n\ttop_p=%s\n", temperature, top_p)
+            log_params = f"[[Parameters]]:\n\ttemperature={temperature}\n\ttop_p={top_p}\n"
+            if cache_key is not None:
+                log_params += f"\tcache_key={cache_key}\n"
+            logger.debug(log_params)
             logger.debug("[[Request]]:\n%s\n", self._format_messages(system_prompt, user_message))
 
         try:
@@ -190,6 +240,11 @@ class LLM:
             if logger is not None and last_error is not None:
                 logger.error("[[Error]]:\n%s\n", last_error)
             return None
+
+        # Save to cache
+        if self._cache_dir_path is not None and cache_key is not None:
+            cache_file = self._cache_dir_path / f"{cache_key}.txt"
+            cache_file.write_text(response, encoding="utf-8")
 
         return response
 

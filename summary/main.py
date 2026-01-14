@@ -1,5 +1,6 @@
 """Main entry point for cognitive chunk extraction."""
 
+import shutil
 from pathlib import Path
 
 import networkx as nx
@@ -18,11 +19,20 @@ def main():
     input_file = data_dir / "明朝那些事儿.txt"
     config_file = project_root / "format.json"
     prompt_file = data_dir / "extraction_prompt.jinja"
-    log_dir = project_root / "logs"
+
+    # Output directory structure
+    output_dir = project_root / "output"
+    log_dir = output_dir / "logs"
+    cache_dir = project_root / "cache"  # Cache outside output for persistence
+
+    # Clear output directory on each run (but keep cache)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize components
     chunker = TextChunker(max_chunk_length=800, batch_size=50000)
-    llm = LLM(config_path=config_file, log_dir_path=log_dir)
+    llm = LLM(config_path=config_file, log_dir_path=log_dir, cache_dir_path=cache_dir)
     extractor = ChunkExtractor(llm, prompt_file)
     working_memory = WorkingMemory(capacity=7)
 
@@ -31,7 +41,10 @@ def main():
 
     print("=== Cognitive Chunk Extraction ===")
     print(f"Working memory capacity: {working_memory.capacity}")
-    print(f"Input file: {input_file.name}\n")
+    print(f"Input file: {input_file.name}")
+    print(f"Output directory: {output_dir}")
+    print(f"  - Logs: {log_dir}")
+    print(f"Cache directory: {cache_dir} (persistent)\n")
 
     # Process text chunks
     chunk_count = 0
@@ -42,9 +55,9 @@ def main():
             break
 
         chunk_count += 1
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Processing segment {chunk_count}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Text preview: {text_segment[:100]}...")
         print(f"\nCurrent working memory ({len(working_memory.get_chunks())} chunks):")
         print(working_memory.format_for_prompt())
@@ -70,9 +83,9 @@ def main():
         else:
             print("\nNo chunks extracted (LLM failed or returned empty)")
 
-    print(f"\n\n{'='*60}")
+    print(f"\n\n{'=' * 60}")
     print("=== Final Results ===")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Total text segments processed: {chunk_count}")
     print(f"Total chunks in knowledge graph: {knowledge_graph.number_of_nodes()}")
     print(f"Total connections: {knowledge_graph.number_of_edges()}")
@@ -81,7 +94,7 @@ def main():
         print(f"  {chunk.id}. {chunk.content}")
 
     # Save knowledge graph
-    output_file = project_root / "knowledge_graph.json"
+    output_file = output_dir / "knowledge_graph.json"
     graph_data = {
         "nodes": [{"id": n, "content": knowledge_graph.nodes[n]["content"]} for n in knowledge_graph.nodes()],
         "edges": [{"from": u, "to": v} for u, v in knowledge_graph.edges()],
@@ -97,4 +110,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
