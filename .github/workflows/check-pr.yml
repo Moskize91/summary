@@ -18,17 +18,21 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install Poetry
+        run: |
+          pip install poetry
+
       - name: Install dependencies
         run: |
-          pip install -e ".[dev]"
+          poetry install
 
       - name: Run pyright checking
         run: |
-          pyright src tests
+          pyright summary tests
 
       - name: Run linting
         run: |
-          pylint ./src/**/*.py ./tests/**/*.py
+          pylint ./summary/**/*.py ./tests/**/*.py
 
       - name: Run tests
         run: |
