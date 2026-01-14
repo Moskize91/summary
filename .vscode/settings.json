@@ -9,6 +9,8 @@
   },
   "files.associations": {
     "*.log": "log",
+    "*.jinja": "jinja-xml",
+    "*.xml": "xml",
   },
   "[jinja-xml]": {
     "editor.wordWrap": "on"
