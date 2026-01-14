@@ -1,4 +1,5 @@
 /.claude/
+/logs/
 /format.json
 
 # Byte-compiled / optimized / DLL files
