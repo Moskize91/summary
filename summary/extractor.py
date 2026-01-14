@@ -56,6 +56,8 @@ class ChunkExtractor:
             for data in chunks_data:
                 chunk = CognitiveChunk(
                     id=0,  # Will be assigned by WorkingMemory
+                    generation=0,  # Will be assigned by WorkingMemory
+                    label=data.get("label", ""),
                     content=data.get("content", ""),
                     links=data.get("links", []),
                 )

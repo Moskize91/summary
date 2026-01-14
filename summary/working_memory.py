@@ -29,14 +29,17 @@ class WorkingMemory:
         Args:
             new_chunks: List of new chunks to add
         """
-        # Assign IDs to new chunks
+        # Increment generation first
+        self._generation += 1
+
+        # Assign IDs and generation to new chunks
         for chunk in new_chunks:
             chunk.id = self._next_id
+            chunk.generation = self._generation
             self._next_id += 1
 
         # Merge new and existing chunks
         all_chunks = self._chunks + new_chunks
-        self._generation += 1
 
         # Calculate scores and keep top-k
         scored_chunks = [(chunk, self._calculate_score(chunk, all_chunks)) for chunk in all_chunks]
@@ -77,14 +80,14 @@ class WorkingMemory:
         """Format chunks for LLM prompt.
 
         Returns:
-            Formatted string representation
+            Formatted string representation with [label] - content format
         """
         if not self._chunks:
             return "(empty)"
 
         lines = []
         for chunk in self._chunks:
-            lines.append(f"{chunk.id}. {chunk.content}")
+            lines.append(f"{chunk.id}. [{chunk.label}] - {chunk.content}")
         return "\n".join(lines)
 
     def clear(self) -> None:

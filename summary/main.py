@@ -70,14 +70,16 @@ def main():
         if new_chunks:
             print(f"\nExtracted {len(new_chunks)} new chunks:")
             for chunk in new_chunks:
-                print(f"  - {chunk.content[:80]}... (links: {chunk.links})")
+                print(f"  - [{chunk.label}] {chunk.content[:80]}... (links: {chunk.links})")
 
             # Add to working memory
             working_memory.add_chunks(new_chunks)
 
             # Add to knowledge graph
             for chunk in new_chunks:
-                knowledge_graph.add_node(chunk.id, content=chunk.content)
+                knowledge_graph.add_node(
+                    chunk.id, generation=chunk.generation, label=chunk.label, content=chunk.content
+                )
                 for link_id in chunk.links:
                     if knowledge_graph.has_node(link_id):
                         knowledge_graph.add_edge(link_id, chunk.id)
@@ -92,12 +94,20 @@ def main():
     print(f"Total connections: {knowledge_graph.number_of_edges()}")
     print(f"\nFinal working memory ({len(working_memory.get_chunks())} chunks):")
     for chunk in working_memory.get_chunks():
-        print(f"  {chunk.id}. {chunk.content}")
+        print(f"  {chunk.id}. [{chunk.label}] {chunk.content}")
 
     # Save knowledge graph
     json_output_file = output_dir / "knowledge_graph.json"
     graph_data = {
-        "nodes": [{"id": n, "content": knowledge_graph.nodes[n]["content"]} for n in knowledge_graph.nodes()],
+        "nodes": [
+            {
+                "id": n,
+                "generation": knowledge_graph.nodes[n]["generation"],
+                "label": knowledge_graph.nodes[n]["label"],
+                "content": knowledge_graph.nodes[n]["content"],
+            }
+            for n in knowledge_graph.nodes()
+        ],
         "edges": [{"from": u, "to": v} for u, v in knowledge_graph.edges()],
     }
 

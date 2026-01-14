@@ -11,10 +11,12 @@ class CognitiveChunk:
     """
 
     id: int
-    content: str
+    generation: int
+    label: str  # Short summary (5-15 chars) for quick scanning
+    content: str  # Full content
     links: list[int] = field(default_factory=list)
 
     def __repr__(self) -> str:
         """Return a readable representation."""
         links_str = f" -> {self.links}" if self.links else ""
-        return f"Chunk({self.id}: {self.content[:50]}...{links_str})"
+        return f"Chunk({self.id}: [{self.label}] {self.content[:50]}...{links_str})"

@@ -26,21 +26,21 @@ def generate_html(json_path: Path, output_path: Path) -> None:
         font_color=cast(Any, "#000000"),
     )
 
-    # Configure physics for better layout
+    # Configure hierarchical layout (top to bottom based on generation)
     net.set_options(
         """
         {
-            "physics": {
-                "enabled": true,
-                "stabilization": {
+            "layout": {
+                "hierarchical": {
                     "enabled": true,
-                    "iterations": 200
-                },
-                "barnesHut": {
-                    "gravitationalConstant": -8000,
-                    "springLength": 150,
-                    "springConstant": 0.04
+                    "direction": "UD",
+                    "sortMethod": "directed",
+                    "levelSeparation": 150,
+                    "nodeSpacing": 200
                 }
+            },
+            "physics": {
+                "enabled": false
             },
             "nodes": {
                 "shape": "box",
@@ -61,22 +61,24 @@ def generate_html(json_path: Path, output_path: Path) -> None:
                     "to": {"enabled": true, "scaleFactor": 0.5}
                 },
                 "color": {"color": "#848484", "highlight": "#2B7CE9"},
-                "smooth": {"enabled": true, "type": "dynamic"}
+                "smooth": {"enabled": true, "type": "cubicBezier"}
             }
         }
         """
     )
 
-    # Add nodes
+    # Add nodes with generation-based levels
     for node in graph_data["nodes"]:
         node_id = node["id"]
+        generation = node["generation"]
+        label = node["label"]
         content = node["content"]
-        # Truncate long content for display
-        label = content if len(content) <= 50 else f"{content[:47]}..."
+        # Display only label on node, full content in tooltip
         net.add_node(
             node_id,
             label=f"{node_id}\n{label}",
-            title=f"ID: {node_id}\n\n{content}",  # Full content in tooltip
+            title=f"ID: {node_id}\nGeneration: {generation}\nLabel: {label}\n\nContent:\n{content}",
+            level=generation,  # Use generation as hierarchical level
         )
 
     # Add edges
