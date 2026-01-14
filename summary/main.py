@@ -1,5 +1,6 @@
 """Main entry point for cognitive chunk extraction."""
 
+import json
 import shutil
 from pathlib import Path
 
@@ -94,18 +95,16 @@ def main():
         print(f"  {chunk.id}. {chunk.content}")
 
     # Save knowledge graph
-    output_file = output_dir / "knowledge_graph.json"
+    json_output_file = output_dir / "knowledge_graph.json"
     graph_data = {
         "nodes": [{"id": n, "content": knowledge_graph.nodes[n]["content"]} for n in knowledge_graph.nodes()],
         "edges": [{"from": u, "to": v} for u, v in knowledge_graph.edges()],
     }
 
-    import json
-
-    with open(output_file, "w", encoding="utf-8") as f:
+    with open(json_output_file, "w", encoding="utf-8") as f:
         json.dump(graph_data, f, ensure_ascii=False, indent=2)
 
-    print(f"\nKnowledge graph saved to: {output_file}")
+    print(f"\nKnowledge graph saved to: {json_output_file}")
 
 
 if __name__ == "__main__":
