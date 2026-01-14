@@ -19,10 +19,12 @@
     "editor.wordWrap": "on"
   },
   "cSpell.words": [
-    "pyproject",
-    "pytest",
+    "Chunker",
     "pylint",
+    "pyproject",
     "pyright",
+    "pytest",
+    "sentencizer",
     "venv"
   ],
   "[python]": {
