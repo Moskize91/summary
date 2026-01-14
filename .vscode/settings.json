@@ -24,6 +24,7 @@
     "pyproject",
     "pyright",
     "pytest",
+    "pyvis",
     "sentencizer",
     "venv"
   ],

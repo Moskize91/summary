@@ -96,8 +96,45 @@ def main():
     for chunk in working_memory.get_chunks():
         print(f"  {chunk.id}. [{chunk.label}] {chunk.content}")
 
-    # Save knowledge graph
+    # Extract anchors using PageRank
+    print(f"\n{'=' * 60}")
+    print("=== Anchor Extraction ===")
+    print(f"{'=' * 60}")
+
+    if knowledge_graph.number_of_nodes() > 0:
+        # Calculate PageRank scores
+        pagerank_scores = nx.pagerank(knowledge_graph, alpha=0.85)
+
+        # Sort nodes by PageRank score
+        sorted_nodes = sorted(
+            pagerank_scores.items(), key=lambda x: x[1], reverse=True
+        )
+
+        # Extract top N anchors (default: 10 or 20% of nodes, whichever is smaller)
+        num_anchors = min(10, max(1, knowledge_graph.number_of_nodes() // 5))
+        anchors = sorted_nodes[:num_anchors]
+
+        print(f"Extracted {len(anchors)} anchors (top {num_anchors}):\n")
+        for rank, (node_id, score) in enumerate(anchors, 1):
+            node_data = knowledge_graph.nodes[node_id]
+            in_degree = knowledge_graph.in_degree(node_id)
+            out_degree = knowledge_graph.out_degree(node_id)
+            print(
+                f"{rank}. [{node_data['label']}] "
+                f"(ID: {node_id}, Gen: {node_data['generation']}, "
+                f"PageRank: {score:.4f}, In: {in_degree}, Out: {out_degree})"
+            )
+            print(f"   {node_data['content'][:100]}...")
+    else:
+        anchors = []
+        print("No nodes in knowledge graph, cannot extract anchors.")
+
+    # Save knowledge graph with anchors
     json_output_file = output_dir / "knowledge_graph.json"
+
+    # Create anchor ID set for quick lookup
+    anchor_ids = {node_id for node_id, _ in anchors} if anchors else set()
+
     graph_data = {
         "nodes": [
             {
@@ -105,16 +142,33 @@ def main():
                 "generation": knowledge_graph.nodes[n]["generation"],
                 "label": knowledge_graph.nodes[n]["label"],
                 "content": knowledge_graph.nodes[n]["content"],
+                "is_anchor": n in anchor_ids,
             }
             for n in knowledge_graph.nodes()
         ],
         "edges": [{"from": u, "to": v} for u, v in knowledge_graph.edges()],
+        "anchors": [
+            {
+                "rank": rank,
+                "id": node_id,
+                "pagerank_score": score,
+                "generation": knowledge_graph.nodes[node_id]["generation"],
+                "label": knowledge_graph.nodes[node_id]["label"],
+                "content": knowledge_graph.nodes[node_id]["content"],
+                "in_degree": knowledge_graph.in_degree(node_id),
+                "out_degree": knowledge_graph.out_degree(node_id),
+            }
+            for rank, (node_id, score) in enumerate(anchors, 1)
+        ],
     }
 
     with open(json_output_file, "w", encoding="utf-8") as f:
         json.dump(graph_data, f, ensure_ascii=False, indent=2)
 
     print(f"\nKnowledge graph saved to: {json_output_file}")
+    print(f"  - {len(graph_data['nodes'])} nodes")
+    print(f"  - {len(graph_data['edges'])} edges")
+    print(f"  - {len(graph_data['anchors'])} anchors")
 
 
 if __name__ == "__main__":
