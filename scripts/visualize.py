@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dev.snake_detector import SnakeDetector, load_graph_from_json, save_snakes_to_json
 from dev.visualize_snakes import visualize_snakes
+from summary.snake_detector import split_connected_components
 
 
 def main():
@@ -30,17 +31,27 @@ def main():
     with open(json_path, encoding="utf-8") as f:
         graph_data = json.load(f)
 
-    # Detect snakes using greedy merging algorithm
+    # Split into connected components
+    print("\nSplitting into connected components...")
+    components = split_connected_components(graph)
+    print(f"Found {len(components)} connected component(s):")
+    for i, comp in enumerate(components):
+        print(f"  Component {i}: {len(comp.nodes())} nodes, {len(comp.edges())} edges")
+
+    # Detect snakes in each component
     print("\nDetecting thematic chains (snakes)...")
     detector = SnakeDetector(
-        max_hops=100000,  # Use very large value to capture all edges (effectively unlimited)
-        stop_ratio=0.15,  # Stop at 15% of initial nodes
-        brake_ratio=0.7,  # Start checking value drop at 70%
-        value_drop_threshold=0.5,  # Stop if value drops below 50% of previous
         min_cluster_size=2,  # Minimum snake length (include pairs)
-        distance_metric="max",  # Use max distance between clusters
+        phase2_stop_ratio=0.15,  # Phase 2 stops at 15% of component nodes
     )
-    snakes = detector.detect_snakes(graph)
+
+    all_snakes = []
+    for i, component in enumerate(components):
+        print(f"\nProcessing Component {i}:")
+        component_snakes = detector.detect_snakes(component)
+        all_snakes.extend(component_snakes)
+
+    snakes = all_snakes
 
     if snakes:
         print(f"Found {len(snakes)} snakes:")
