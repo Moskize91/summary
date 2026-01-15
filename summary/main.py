@@ -54,7 +54,7 @@ def main():
 
     # Process text chunks
     chunk_count = 0
-    max_chunks = 10  # Process first 10 chunks for testing
+    max_chunks = 40  # Process first 40 chunks for testing
 
     for i, chunk_with_sentences in enumerate(chunker.stream_chunks_from_file(input_file)):
         if i >= max_chunks:

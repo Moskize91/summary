@@ -2,19 +2,17 @@
 
 Two-Phase Greedy Algorithm:
 
-Phase 1: Balanced Growth (Prevent Winner-Takes-All)
-- Limit cluster size ≤ 3 to prevent early dominance
-- Stop after reducing 25% of nodes (e.g., 34 → ~26 clusters)
-- Use stricter brake conditions to ensure fair competition
-
-Phase 2: Fragment Cleanup (Absorb Isolated Nodes)
-- Remove cluster size limit, allow unlimited growth
-- **Strict rule**: Only allow snake (≥2) + singleton (1), with bonus
+Phase 1: Snake Forming (Forbid Snake Eating Snake)
+- Allow snakes to absorb isolated nodes
 - **Forbidden**: Snake eating snake (both ≥2) - directly skip
-- This prevents over-merging while cleaning up isolated nodes
-- Use same stop/brake conditions as before
+- Run until no more valid merges (heap empty)
 
-This design prevents early "winner-takes-all" while quickly growing snakes in late stage.
+Phase 2: Snake Merging (Allow Snake Eating Snake)
+- Remove the "forbid snake eating snake" restriction
+- Allow all merges based on fingerprint similarity
+- Stop when snake count ≤ total_nodes * 15%
+
+This design first forms coherent snakes, then merges similar snakes into broader themes.
 """
 
 import heapq
@@ -31,6 +29,7 @@ class MergeConfig:
 
     max_cluster_size: int | None = None  # None = no limit
     reduction_ratio: float | None = None  # 0.25 = reduce by 25%, then stop
+    stop_count: int | None = None  # Absolute number of clusters to stop at
     stop_ratio: float = 0.3  # Force stop when nodes <= initial * stop_ratio
     brake_ratio: float = 0.7  # Activate brake check when nodes <= initial * brake_ratio
     value_drop_threshold: float = 0.5  # Stop if value drops below prev * threshold
@@ -55,7 +54,7 @@ class SnakeDetector:
 
     def __init__(
         self,
-        max_hops: int = 3,
+        max_hops: int = 100000,
         stop_ratio: float = 0.4,
         brake_ratio: float = 0.7,
         value_drop_threshold: float = 0.5,
@@ -88,46 +87,49 @@ class SnakeDetector:
         Returns:
             List of snakes, where each snake is a list of node IDs sorted by sentence_id
         """
-        if len(graph.nodes()) < self.min_cluster_size:
-            return []
+        total_nodes = len(graph.nodes())
 
         # Step 1: Compute fingerprints for all nodes
         print("  Computing topological fingerprints...")
         fingerprints = self._compute_all_fingerprints(graph)
 
-        # Step 2: Phase 1 - Balanced Growth
-        print("\n  === Phase 1: Balanced Growth ===")
+        # Phase 1: Snake Forming (forbid snake eating snake)
+        print("\n  === Phase 1: Snake Forming (Forbid Snake Eating Snake) ===")
         phase1_config = MergeConfig(
-            max_cluster_size=3,
-            reduction_ratio=0.25,
-            stop_ratio=self.stop_ratio,
-            brake_ratio=0.01,  # Nearly disabled - brake almost never activates
-            value_drop_threshold=0.01,  # Nearly disabled - almost never stops on value drop
-            enable_bonus=False,
+            max_cluster_size=None,  # No limit
+            reduction_ratio=None,  # No external stop
+            stop_count=None,  # No absolute stop
+            stop_ratio=0.0,  # Disabled - run until heap empty
+            brake_ratio=0.0,  # Disabled
+            value_drop_threshold=0.0,  # Disabled
+            enable_bonus=True,  # Use to implement "forbid snake eating snake"
+            bonus_threshold=2,  # >=2 is a snake
+            bonus_amount=0.0,  # No actual bonus
         )
         clusters = self._greedy_merge(graph, fingerprints, phase1_config)
 
-        # Step 3: Phase 2 - Fragment Cleanup
-        print("\n  === Phase 2: Fragment Cleanup ===")
+        # Phase 2: Snake Merging (allow snake eating snake)
+        print("\n  === Phase 2: Snake Merging (Allow Snake Eating Snake) ===")
+        phase2_stop_count = int(total_nodes * 0.15)
+        print(f"  Target: Reduce to {phase2_stop_count} snakes ({0.15:.0%} of {total_nodes} total nodes)")
+
         phase2_config = MergeConfig(
             max_cluster_size=None,  # No limit
-            reduction_ratio=None,
-            stop_ratio=self.stop_ratio,
-            brake_ratio=0.01,  # Nearly disabled - brake almost never activates
-            value_drop_threshold=0.01,  # Nearly disabled - almost never stops on value drop
-            enable_bonus=True,
-            bonus_threshold=3,
-            bonus_amount=1.0,  # 100% bonus for absorbing singletons
+            reduction_ratio=None,  # No ratio-based stop
+            stop_count=phase2_stop_count,  # Stop at 15% of total nodes
+            stop_ratio=0.0,  # Disabled
+            brake_ratio=0.0,  # Disabled
+            value_drop_threshold=0.0,  # Disabled
+            enable_bonus=False,  # Disable - allow snake eating snake
         )
         clusters = self._greedy_merge(graph, fingerprints, phase2_config, initial_clusters=clusters)
 
-        # Step 4: Filter and sort
+        # Step 3: Filter and sort
         snakes = []
         for cluster in clusters.values():
-            if len(cluster) >= self.min_cluster_size:
-                # Sort by sentence_id
-                cluster.sort(key=lambda nid: graph.nodes[nid]["sentence_id"])
-                snakes.append(cluster)
+            # Sort by sentence_id
+            cluster.sort(key=lambda nid: graph.nodes[nid]["sentence_id"])
+            snakes.append(cluster)
 
         return snakes
 
@@ -219,7 +221,6 @@ class SnakeDetector:
                 fingerprint[edge] = 1
 
         return fingerprint
-
 
     def _compute_distance(self, fp1: dict, fp2: dict) -> float:
         """Compute normalized Euclidean distance between two edge-based fingerprints.
@@ -331,12 +332,15 @@ class SnakeDetector:
 
         initial_count = len(clusters)
 
-        # Compute stop conditions
-        if config.reduction_ratio is not None:
+        # Compute stop conditions (priority: stop_count > reduction_ratio > stop_ratio)
+        if config.stop_count is not None:
+            # Use absolute stop count
+            stop_count = config.stop_count
+        elif config.reduction_ratio is not None:
             # Stop after reducing X% of nodes
             stop_count = int(initial_count * (1 - config.reduction_ratio))
         else:
-            # Use absolute stop ratio
+            # Use relative stop ratio
             stop_count = int(initial_count * config.stop_ratio)
 
         brake_count = int(initial_count * config.brake_ratio)

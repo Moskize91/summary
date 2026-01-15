@@ -99,8 +99,38 @@ def visualize_snakes(graph: nx.DiGraph, snakes: list[list[int]], output_path: Pa
                 color="#999999",
             )
 
-    # Sort nodes by sentence_id for temporal ordering
-    sorted_nodes = sorted(graph_data["nodes"], key=lambda n: n["sentence_id"])
+    # Infer positions for nodes with sentence_id=0
+    def infer_sentence_id(node_id: int, graph_data: dict) -> int:
+        """Infer sentence_id for nodes with sentence_id=0 based on graph topology."""
+        node = next(n for n in graph_data["nodes"] if n["id"] == node_id)
+        if node["sentence_id"] != 0:
+            return node["sentence_id"]
+
+        # Find predecessors and successors
+        preds = [e["from"] for e in graph_data["edges"] if e["to"] == node_id]
+        succs = [e["to"] for e in graph_data["edges"] if e["from"] == node_id]
+
+        # Get sentence_ids of neighbors
+        neighbor_ids = []
+        for pred_id in preds:
+            pred_node = next((n for n in graph_data["nodes"] if n["id"] == pred_id), None)
+            if pred_node and pred_node["sentence_id"] != 0:
+                neighbor_ids.append(pred_node["sentence_id"])
+
+        for succ_id in succs:
+            succ_node = next((n for n in graph_data["nodes"] if n["id"] == succ_id), None)
+            if succ_node and succ_node["sentence_id"] != 0:
+                neighbor_ids.append(succ_node["sentence_id"])
+
+        if neighbor_ids:
+            # Use average of neighbors' sentence_ids
+            return sum(neighbor_ids) / len(neighbor_ids)
+        else:
+            # Fallback: use node_id as proxy
+            return node_id * 1000  # Large number to push to end
+
+    # Sort nodes by inferred sentence_id for temporal ordering
+    sorted_nodes = sorted(graph_data["nodes"], key=lambda n: infer_sentence_id(n["id"], graph_data))
 
     # Add invisible edges for temporal ordering
     for i in range(len(sorted_nodes) - 1):
@@ -156,12 +186,27 @@ def _generate_html_wrapper(
         snakes: List of detected snakes
         node_to_snake: Mapping from node ID to snake ID
     """
-    # Read SVG content
+    # Read SVG content and extract dimensions
     with open(svg_path, encoding="utf-8") as f:
         svg_content = f.read()
 
+    # Extract SVG viewBox to get actual dimensions
+    import re as re_module
+
+    viewbox_match = re_module.search(r'viewBox="([^"]+)"', svg_content)
+    if viewbox_match:
+        viewbox = viewbox_match.group(1).split()
+        svg_width = float(viewbox[2])
+        svg_height = float(viewbox[3])
+    else:
+        # Fallback: parse width/height attributes
+        width_match = re_module.search(r'width="([\d.]+)pt"', svg_content)
+        height_match = re_module.search(r'height="([\d.]+)pt"', svg_content)
+        svg_width = float(width_match.group(1)) if width_match else 1000
+        svg_height = float(height_match.group(1)) if height_match else 2000
+
     # Remove xlink:title attributes
-    svg_content = re.sub(r'\s*xlink:title="[^"]*"', "", svg_content)
+    svg_content = re_module.sub(r'\s*xlink:title="[^"]*"', "", svg_content)
 
     # Build node data
     node_data = {}
@@ -217,29 +262,27 @@ def _generate_html_wrapper(
     <style>
         body {{
             margin: 0;
-            padding: 20px;
+            padding: 0;
             font-family: Arial, sans-serif;
             background-color: #f5f5f5;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            min-height: 100vh;
+            overflow: auto;
         }}
 
         #container {{
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            padding: 20px;
-            max-width: 95%;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
         }}
 
         #legend {{
-            margin-bottom: 20px;
-            padding: 15px;
-            background: #f9f9f9;
-            border-radius: 6px;
-            border: 1px solid #ddd;
+            background: white;
+            padding: 15px 20px;
+            border-bottom: 1px solid #ddd;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            flex-shrink: 0;
         }}
 
         #legend h3 {{
@@ -249,29 +292,48 @@ def _generate_html_wrapper(
         }}
 
         .legend-item {{
-            display: flex;
-            align-items: center;
-            margin: 6px 0;
+            display: inline-block;
+            margin: 4px 12px 4px 0;
             font-size: 13px;
         }}
 
         .legend-color {{
             display: inline-block;
-            width: 20px;
-            height: 20px;
-            border-radius: 3px;
-            margin-right: 8px;
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
+            margin-right: 6px;
             border: 2px solid rgba(0,0,0,0.3);
+            vertical-align: middle;
         }}
 
         .legend-text {{
             color: #555;
+            vertical-align: middle;
         }}
 
         #svg-container {{
-            display: flex;
-            justify-content: center;
+            flex: 1;
             overflow: auto;
+            background: white;
+            padding: 20px;
+            position: relative;
+            overscroll-behavior: contain;
+            min-height: 0;
+        }}
+
+        #svg-wrapper {{
+            display: inline-block;
+            min-width: fit-content;
+            min-height: fit-content;
+        }}
+
+        svg {{
+            display: block;
+            max-width: none;
+            max-height: none;
+            width: auto;
+            height: auto;
         }}
 
         svg title {{
@@ -336,7 +398,9 @@ def _generate_html_wrapper(
             {legend_html}
         </div>
         <div id="svg-container">
-            {svg_content}
+            <div id="svg-wrapper">
+                {svg_content}
+            </div>
         </div>
     </div>
     <div id="tooltip"></div>
@@ -346,6 +410,36 @@ def _generate_html_wrapper(
         const tooltip = document.getElementById('tooltip');
         const svg = document.querySelector('svg');
         const nodes = svg.querySelectorAll('g.node');
+        const svgContainer = document.getElementById('svg-container');
+
+        // Prevent browser back navigation on horizontal swipe in SVG container
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        svgContainer.addEventListener('touchstart', (e) => {{
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }}, {{ passive: true }});
+
+        svgContainer.addEventListener('touchmove', (e) => {{
+            const touchEndX = e.touches[0].clientX;
+            const touchEndY = e.touches[0].clientY;
+            const diffX = touchEndX - touchStartX;
+            const diffY = touchEndY - touchStartY;
+
+            // Only prevent if:
+            // 1. Horizontal swipe is dominant (more than 2:1 ratio)
+            // 2. Moving right (positive diffX) near left edge
+            // 3. Container is scrolled to the left edge
+            const isHorizontalDominant = Math.abs(diffX) > Math.abs(diffY) * 2;
+            const isSwipingRight = diffX > 30;
+            const isAtLeftEdge = svgContainer.scrollLeft <= 10;
+
+            if (isHorizontalDominant && isSwipingRight && isAtLeftEdge) {{
+                e.preventDefault();
+            }}
+        }}, {{ passive: false }});
+
 
         nodes.forEach(node => {{
             const title = node.querySelector('title');
