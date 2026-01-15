@@ -37,7 +37,7 @@ def main():
         stop_ratio=0.3,  # Force stop at 30% of initial nodes
         brake_ratio=0.7,  # Start checking value drop at 70%
         value_drop_threshold=0.5,  # Stop if value drops below 50% of previous
-        min_cluster_size=3,  # Minimum snake length
+        min_cluster_size=3,  # Minimum snake length (filter out pairs)
         distance_metric="max",  # Use max distance between clusters
     )
     snakes = detector.detect_snakes(graph)
