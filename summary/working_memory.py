@@ -89,10 +89,16 @@ class WorkingMemory:
                 if from_chunk is None:
                     print(f"Warning: temp_id '{from_ref}' not found in extracted chunks")
                     continue
-                from_id = from_chunk.id
             else:
-                # Working memory ID reference
-                from_id = from_ref
+                # Working memory ID reference - find in existing chunks
+                from_chunk = None
+                for chunk in self._chunks:
+                    if chunk.id == from_ref:
+                        from_chunk = chunk
+                        break
+                if from_chunk is None:
+                    print(f"Warning: Working memory ID {from_ref} not found")
+                    continue
 
             # Resolve "to" reference
             if isinstance(to_ref, str):
@@ -101,21 +107,47 @@ class WorkingMemory:
                 if to_chunk is None:
                     print(f"Warning: temp_id '{to_ref}' not found in extracted chunks")
                     continue
-                to_id = to_chunk.id
             else:
-                # Working memory ID reference
-                to_id = to_ref
+                # Working memory ID reference - find in existing chunks
+                to_chunk = None
+                for chunk in self._chunks:
+                    if chunk.id == to_ref:
+                        to_chunk = chunk
+                        break
+                if to_chunk is None:
+                    print(f"Warning: Working memory ID {to_ref} not found")
+                    continue
 
-            # Add link to the "to" chunk's links array
-            # (meaning "to" chunk is linked FROM "from" chunk)
+            # Normalize edge direction: always from later to earlier (based on sentence_id)
+            # If sentence_id is the same, use chunk.id as tiebreaker
+            if from_chunk.sentence_id > to_chunk.sentence_id or (
+                from_chunk.sentence_id == to_chunk.sentence_id and from_chunk.id > to_chunk.id
+            ):
+                # from is later, to is earlier: edge should be from -> to (correct direction)
+                edge_from_id = from_chunk.id
+                edge_to_id = to_chunk.id
+            else:
+                # to is later, from is earlier: reverse edge direction
+                edge_from_id = to_chunk.id
+                edge_to_id = from_chunk.id
+
+            # Add link to the "to" chunk's links array (edge_to_id is linked FROM edge_from_id)
             for chunk in extraction_result.chunks:
-                if chunk.id == to_id:
-                    if from_id not in chunk.links:
-                        chunk.links.append(from_id)
+                if chunk.id == edge_to_id:
+                    if edge_from_id not in chunk.links:
+                        chunk.links.append(edge_from_id)
                     break
 
+            # Also check existing chunks in working memory
+            if edge_to_id not in [c.id for c in extraction_result.chunks]:
+                for chunk in self._chunks:
+                    if chunk.id == edge_to_id:
+                        if edge_from_id not in chunk.links:
+                            chunk.links.append(edge_from_id)
+                        break
+
             # Collect edge for later addition to knowledge graph
-            edges.append((from_id, to_id))
+            edges.append((edge_from_id, edge_to_id))
 
         # Merge new and existing chunks for working memory
         all_chunks = self._chunks + extraction_result.chunks

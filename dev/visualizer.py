@@ -71,31 +71,23 @@ def generate_html(json_path: Path, output_path: Path) -> None:
     for node in graph_data["nodes"]:
         node_id = node["id"]
         generation = node["generation"]
+        sentence_id = node["sentence_id"]
         label = node["label"]
         content = node["content"]
-        is_anchor = node.get("is_anchor", False)
-
-        # Different colors for anchor vs regular nodes
-        if is_anchor:
-            bg_color = "#FFEBEE"  # Light red background for anchors
-            border_width = 3
-            anchor_marker = "⚓ "
-        else:
-            bg_color = "#D2E5FF"  # Light blue background for regular nodes
-            border_width = 2
-            anchor_marker = ""
 
         # Display ID and label on node, full content in tooltip
-        anchor_prefix = "[ANCHOR] " if is_anchor else ""
-        tooltip = f"{anchor_prefix}ID: {node_id}\nGeneration: {generation}\nLabel: {label}\n\nContent:\n{content}"
+        tooltip = (
+            f"ID: {node_id}\nGeneration: {generation}\nSentence ID: {sentence_id}\n"
+            f"Label: {label}\n\nContent:\n{content}"
+        )
 
         net.add_node(
             node_id,
-            label=f"{anchor_marker}{node_id}\n{label}",
+            label=f"{node_id}\n{label}",
             title=tooltip,
             level=generation,  # Use generation as hierarchical level
-            color=bg_color,
-            borderWidth=border_width,
+            color="#D2E5FF",
+            borderWidth=2,
         )
 
     # Add edges

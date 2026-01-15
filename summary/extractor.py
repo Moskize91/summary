@@ -33,12 +33,15 @@ class ChunkExtractor:
         self.llm = llm
         self.prompt_template_path = prompt_template_path
 
-    def extract_chunks(self, text: str, working_memory: WorkingMemory) -> ExtractionResult | None:
+    def extract_chunks(
+        self, text: str, working_memory: WorkingMemory, sentence_map: dict[int, str]
+    ) -> ExtractionResult | None:
         """Extract cognitive chunks from text.
 
         Args:
             text: Text segment to process
             working_memory: Current working memory state
+            sentence_map: Mapping from sentence ID to sentence text
 
         Returns:
             ExtractionResult containing chunks, temp_ids, links, and order correctness
@@ -75,9 +78,14 @@ class ChunkExtractor:
             temp_ids = []
 
             for data in chunks_data:
+                # Find sentence_id from source_sentences
+                source_sentences = data.get("source_sentences", [])
+                sentence_id = self._find_sentence_id(source_sentences, sentence_map)
+
                 chunk = CognitiveChunk(
                     id=0,  # Will be assigned by WorkingMemory
                     generation=0,  # Will be assigned by WorkingMemory
+                    sentence_id=sentence_id,
                     label=data.get("label", ""),
                     content=data.get("content", ""),
                     links=[],  # Will be populated after ID assignment
@@ -157,3 +165,33 @@ class ChunkExtractor:
             return False
 
         return chunks_pos < links_pos
+
+    def _find_sentence_id(self, source_sentences: list[str], sentence_map: dict[int, str]) -> int:
+        """Find the minimum sentence ID from source sentences using substring matching.
+
+        Args:
+            source_sentences: List of sentence strings from LLM output
+            sentence_map: Mapping from sentence ID to sentence text
+
+        Returns:
+            Minimum sentence ID found, or 0 if no match found
+        """
+        found_ids = []
+
+        for source_sent in source_sentences:
+            source_sent_stripped = source_sent.strip()
+            if not source_sent_stripped:
+                continue
+
+            # Try to find this sentence in sentence_map
+            for sent_id, sent_text in sentence_map.items():
+                # Use substring matching (source_sent might be truncated by LLM)
+                if source_sent_stripped in sent_text or sent_text in source_sent_stripped:
+                    found_ids.append(sent_id)
+                    break
+
+        if not found_ids:
+            print(f"Warning: Could not find sentence IDs for source_sentences: {source_sentences[:2]}...")
+            return 0
+
+        return min(found_ids)

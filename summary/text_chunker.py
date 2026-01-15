@@ -1,10 +1,19 @@
 """Text chunking utilities for splitting large texts into manageable chunks."""
 
 from collections.abc import Generator
+from dataclasses import dataclass
 from pathlib import Path
 
 from spacy.lang.xx import MultiLanguage
 from spacy.language import Language
+
+
+@dataclass
+class ChunkWithSentences:
+    """A text chunk with associated sentence IDs."""
+
+    text: str
+    sentence_ids: list[int]
 
 
 class TextChunker:
@@ -20,6 +29,8 @@ class TextChunker:
         self.max_chunk_length = max_chunk_length
         self.batch_size = batch_size
         self._nlp = self._load_language_model()
+        self._sentence_map: dict[int, str] = {}  # sentence_id -> sentence_text
+        self._next_sentence_id: int = 1
 
     def _load_language_model(self) -> Language:
         """Load the spacy language model with sentencizer."""
@@ -51,17 +62,18 @@ class TextChunker:
         if text_buffer:
             yield text_buffer
 
-    def stream_chunks_from_file(self, file_path: Path) -> Generator[str, None, None]:
+    def stream_chunks_from_file(self, file_path: Path) -> Generator[ChunkWithSentences, None, None]:
         """Stream text chunks from a file using spacy's pipe() for efficient processing.
 
         Args:
             file_path: Path to the text file
 
         Yields:
-            Text chunks with length <= max_chunk_length
+            ChunkWithSentences objects with text and sentence IDs
         """
         current_chunk = []
         current_chunk_length = 0
+        current_sentence_ids = []
 
         # Use spacy's pipe() for efficient batch processing
         for doc in self._nlp.pipe(self._generate_text_batches(file_path), batch_size=10):
@@ -74,13 +86,42 @@ class TextChunker:
 
                 # Yield chunk if adding sentence would exceed limit
                 if current_chunk and current_chunk_length + sentence_length > self.max_chunk_length:
-                    yield "".join(current_chunk)
+                    yield ChunkWithSentences(
+                        text="".join(current_chunk),
+                        sentence_ids=current_sentence_ids.copy(),
+                    )
                     current_chunk = []
                     current_chunk_length = 0
+                    current_sentence_ids = []
+
+                # Assign sentence ID and save to map
+                sentence_id = self._next_sentence_id
+                self._sentence_map[sentence_id] = sentence_text
+                self._next_sentence_id += 1
 
                 current_chunk.append(sentence_text)
                 current_chunk_length += sentence_length
+                current_sentence_ids.append(sentence_id)
 
         # Yield the last chunk if it exists
         if current_chunk:
-            yield "".join(current_chunk)
+            yield ChunkWithSentences(
+                text="".join(current_chunk),
+                sentence_ids=current_sentence_ids.copy(),
+            )
+
+    def get_sentence_map(self) -> dict[int, str]:
+        """Get the sentence ID to sentence text mapping.
+
+        Returns:
+            Dictionary mapping sentence IDs to sentence text
+        """
+        return self._sentence_map.copy()
+
+    def reset_sentence_tracking(self) -> None:
+        """Reset sentence ID tracking and clear sentence map.
+
+        Call this before processing a new file if you want fresh sentence IDs.
+        """
+        self._sentence_map.clear()
+        self._next_sentence_id = 1

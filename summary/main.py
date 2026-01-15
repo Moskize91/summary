@@ -9,6 +9,7 @@ import networkx as nx
 from .extractor import ChunkExtractor
 from .llm import LLM
 from .text_chunker import TextChunker
+from .wave_reflection import WaveReflection
 from .working_memory import WorkingMemory
 
 
@@ -36,9 +37,13 @@ def main():
     llm = LLM(config_path=config_file, log_dir_path=log_dir, cache_dir_path=cache_dir)
     extractor = ChunkExtractor(llm, prompt_file)
     working_memory = WorkingMemory(capacity=7)
+    wave_reflection = WaveReflection(generation_decay_factor=0.68)
 
     # Initialize graph to store all chunks
     knowledge_graph = nx.DiGraph()
+
+    # Track all chunks for Wave Reflection
+    all_chunks = []
 
     print("=== Cognitive Chunk Extraction ===")
     print(f"Working memory capacity: {working_memory.capacity}")
@@ -51,21 +56,25 @@ def main():
     chunk_count = 0
     max_chunks = 10  # Process first 10 chunks for testing
 
-    for i, text_segment in enumerate(chunker.stream_chunks_from_file(input_file)):
+    for i, chunk_with_sentences in enumerate(chunker.stream_chunks_from_file(input_file)):
         if i >= max_chunks:
             break
 
         chunk_count += 1
+        text_segment = chunk_with_sentences.text
+        sentence_map = chunker.get_sentence_map()
+
         print(f"\n{'=' * 60}")
         print(f"Processing segment {chunk_count}")
         print(f"{'=' * 60}")
         print(f"Text preview: {text_segment[:100]}...")
+        print(f"Sentence IDs: {chunk_with_sentences.sentence_ids[:5]}...")
         print(f"\nCurrent working memory ({len(working_memory.get_chunks())} chunks):")
         print(working_memory.format_for_prompt())
 
         # Extract chunks
         print("\nExtracting cognitive chunks...")
-        extraction_result = extractor.extract_chunks(text_segment, working_memory)
+        extraction_result = extractor.extract_chunks(text_segment, working_memory, sentence_map)
 
         if extraction_result is None:
             print("\nNo chunks extracted (LLM failed or returned empty)")
@@ -86,11 +95,18 @@ def main():
             # Process links and add to working memory
             added_chunks, edges = working_memory.add_chunks_with_links(extraction_result)
 
+            # Add chunks to all_chunks list
+            all_chunks.extend(added_chunks)
+
+            # Track latest chunk IDs for Wave Reflection
+            latest_chunk_ids = [chunk.id for chunk in added_chunks]
+
             # Add nodes to knowledge graph with assigned IDs
             for chunk in added_chunks:
                 knowledge_graph.add_node(
                     chunk.id,
                     generation=chunk.generation,
+                    sentence_id=chunk.sentence_id,
                     label=chunk.label,
                     content=chunk.content,
                 )
@@ -104,6 +120,18 @@ def main():
                 print(f"  - {from_id} -> {to_id}")
 
             print(f"\nAdded {len(added_chunks)} chunks to knowledge graph")
+
+            # Use Wave Reflection to select top chunks for working memory
+            if all_chunks:
+                selected_chunks = wave_reflection.select_top_chunks(
+                    all_chunks=all_chunks,
+                    knowledge_graph=knowledge_graph,
+                    latest_chunk_ids=latest_chunk_ids,
+                    capacity=working_memory.capacity,
+                )
+                # Update working memory with selected chunks
+                working_memory._chunks = selected_chunks
+                print(f"\nWave Reflection selected {len(selected_chunks)} chunks for working memory")
         else:
             print("\nNo chunks extracted from this segment")
 
@@ -117,68 +145,21 @@ def main():
     for chunk in working_memory.get_chunks():
         print(f"  {chunk.id}. [{chunk.label}] {chunk.content}")
 
-    # Extract anchors using PageRank
-    print(f"\n{'=' * 60}")
-    print("=== Anchor Extraction ===")
-    print(f"{'=' * 60}")
-
-    if knowledge_graph.number_of_nodes() > 0:
-        # Calculate PageRank scores
-        pagerank_scores = nx.pagerank(knowledge_graph, alpha=0.85)
-
-        # Sort nodes by PageRank score
-        sorted_nodes = sorted(pagerank_scores.items(), key=lambda x: x[1], reverse=True)
-
-        # Extract top N anchors (default: 10 or 20% of nodes, whichever is smaller)
-        num_anchors = min(10, max(1, knowledge_graph.number_of_nodes() // 5))
-        anchors = sorted_nodes[:num_anchors]
-
-        print(f"Extracted {len(anchors)} anchors (top {num_anchors}):\n")
-        for rank, (node_id, score) in enumerate(anchors, 1):
-            node_data = knowledge_graph.nodes[node_id]
-            in_degree = knowledge_graph.in_degree(node_id)
-            out_degree = knowledge_graph.out_degree(node_id)
-            print(
-                f"{rank}. [{node_data['label']}] "
-                f"(ID: {node_id}, Gen: {node_data['generation']}, "
-                f"PageRank: {score:.4f}, In: {in_degree}, Out: {out_degree})"
-            )
-            print(f"   {node_data['content'][:100]}...")
-    else:
-        anchors = []
-        print("No nodes in knowledge graph, cannot extract anchors.")
-
-    # Save knowledge graph with anchors
+    # Save knowledge graph
     json_output_file = output_dir / "knowledge_graph.json"
-
-    # Create anchor ID set for quick lookup
-    anchor_ids = {node_id for node_id, _ in anchors} if anchors else set()
 
     graph_data = {
         "nodes": [
             {
                 "id": n,
                 "generation": knowledge_graph.nodes[n]["generation"],
+                "sentence_id": knowledge_graph.nodes[n]["sentence_id"],
                 "label": knowledge_graph.nodes[n]["label"],
                 "content": knowledge_graph.nodes[n]["content"],
-                "is_anchor": n in anchor_ids,
             }
             for n in knowledge_graph.nodes()
         ],
         "edges": [{"from": u, "to": v} for u, v in knowledge_graph.edges()],
-        "anchors": [
-            {
-                "rank": rank,
-                "id": node_id,
-                "pagerank_score": score,
-                "generation": knowledge_graph.nodes[node_id]["generation"],
-                "label": knowledge_graph.nodes[node_id]["label"],
-                "content": knowledge_graph.nodes[node_id]["content"],
-                "in_degree": knowledge_graph.in_degree(node_id),
-                "out_degree": knowledge_graph.out_degree(node_id),
-            }
-            for rank, (node_id, score) in enumerate(anchors, 1)
-        ],
     }
 
     with open(json_output_file, "w", encoding="utf-8") as f:
@@ -187,7 +168,6 @@ def main():
     print(f"\nKnowledge graph saved to: {json_output_file}")
     print(f"  - {len(graph_data['nodes'])} nodes")
     print(f"  - {len(graph_data['edges'])} edges")
-    print(f"  - {len(graph_data['anchors'])} anchors")
 
 
 if __name__ == "__main__":

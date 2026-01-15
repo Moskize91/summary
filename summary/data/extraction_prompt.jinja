@@ -27,12 +27,14 @@ CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "lin
     {
       "temp_id": "A",
       "label": "brief topic label (5-15 chars)",
-      "content": "full description of the key information"
+      "content": "full description of the key information",
+      "source_sentences": ["original sentence 1 from text", "original sentence 2 from text"]
     },
     {
       "temp_id": "B",
       "label": "another topic label",
-      "content": "another description"
+      "content": "another description",
+      "source_sentences": ["original sentence from text"]
     }
   ],
   "links": [
@@ -44,6 +46,7 @@ CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "lin
 
 **Explanation:**
 - "chunks": Array of new information extracted from the text (use temp_id like "A", "B", "C")
+  - "source_sentences": Array of original sentences from the text that this chunk is based on (copy exact text)
 - "links": Array of relationships between chunks
   - "from" can be: working memory ID (number) OR temp_id (string from chunks above)
   - "to" can be: working memory ID (number) OR temp_id (string from chunks above)

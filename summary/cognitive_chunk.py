@@ -12,6 +12,7 @@ class CognitiveChunk:
 
     id: int
     generation: int
+    sentence_id: int  # Minimum sentence ID from source text (for ordering)
     label: str  # Short summary (5-15 chars) for quick scanning
     content: str  # Full content
     links: list[int] = field(default_factory=list)
