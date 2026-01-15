@@ -2,11 +2,22 @@
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from .cognitive_chunk import CognitiveChunk
 from .llm import LLM
 from .working_memory import WorkingMemory
+
+
+@dataclass
+class ExtractionResult:
+    """Result of chunk extraction containing chunks and their relationships."""
+
+    chunks: list[CognitiveChunk]  # Extracted chunks (id=0, to be assigned)
+    temp_ids: list[str]  # Temporary IDs corresponding to chunks
+    links: list[dict]  # Raw link data: [{"from": ..., "to": ...}]
+    order_correct: bool  # Whether JSON key order was correct
 
 
 class ChunkExtractor:
@@ -22,7 +33,7 @@ class ChunkExtractor:
         self.llm = llm
         self.prompt_template_path = prompt_template_path
 
-    def extract_chunks(self, text: str, working_memory: WorkingMemory) -> list[CognitiveChunk]:
+    def extract_chunks(self, text: str, working_memory: WorkingMemory) -> ExtractionResult | None:
         """Extract cognitive chunks from text.
 
         Args:
@@ -30,7 +41,8 @@ class ChunkExtractor:
             working_memory: Current working memory state
 
         Returns:
-            List of extracted chunks
+            ExtractionResult containing chunks, temp_ids, links, and order correctness
+            None if extraction failed
         """
         # Build prompt
         system_prompt = self.llm.load_system_prompt(
@@ -47,28 +59,45 @@ class ChunkExtractor:
         )
 
         if not response:
-            return []
+            return None
 
         # Parse JSON response
         try:
-            chunks_data = self._parse_json_response(response)
+            parsed_data = self._parse_json_response(response)
+
+            # Check if order is correct (chunks before links)
+            order_correct = self._check_json_order(response)
+
+            chunks_data = parsed_data.get("chunks", [])
+            links_data = parsed_data.get("links", [])
+
             chunks = []
+            temp_ids = []
+
             for data in chunks_data:
                 chunk = CognitiveChunk(
                     id=0,  # Will be assigned by WorkingMemory
                     generation=0,  # Will be assigned by WorkingMemory
                     label=data.get("label", ""),
                     content=data.get("content", ""),
-                    links=data.get("links", []),
+                    links=[],  # Will be populated after ID assignment
                 )
                 chunks.append(chunk)
-            return chunks
-        except (json.JSONDecodeError, ValueError) as e:
+                temp_ids.append(data.get("temp_id", ""))
+
+            return ExtractionResult(
+                chunks=chunks,
+                temp_ids=temp_ids,
+                links=links_data,
+                order_correct=order_correct,
+            )
+
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
             print(f"Failed to parse LLM response: {e}")
             print(f"Response was: {response[:200]}...")
-            return []
+            return None
 
-    def _parse_json_response(self, response: str) -> list[dict]:
+    def _parse_json_response(self, response: str) -> dict:
         """Parse JSON from LLM response.
 
         Handles cases where LLM includes extra text around JSON.
@@ -77,14 +106,54 @@ class ChunkExtractor:
             response: LLM response text
 
         Returns:
-            Parsed JSON data
+            Parsed JSON data as dict with "chunks" and "links" keys
         """
-        # Try to extract JSON from response
-        # Look for JSON array pattern
-        json_match = re.search(r"\[[\s\S]*\]", response)
+        # Try to extract JSON object from response
+        # Look for JSON object pattern
+        json_match = re.search(r"\{[\s\S]*\}", response)
         if json_match:
             json_str = json_match.group(0)
-            return json.loads(json_str)
+            parsed = json.loads(json_str)
 
-        # If no array found, try parsing the whole response
-        return json.loads(response)
+            # Ensure keys exist and enforce order
+            if "chunks" not in parsed or "links" not in parsed:
+                raise ValueError("Missing 'chunks' or 'links' in response")
+
+            # Return with enforced key order (Python 3.7+ preserves insertion order)
+            return {
+                "chunks": parsed["chunks"],
+                "links": parsed["links"],
+            }
+
+        # If no object found, try parsing the whole response
+        parsed = json.loads(response)
+        return {
+            "chunks": parsed["chunks"],
+            "links": parsed["links"],
+        }
+
+    def _check_json_order(self, response: str) -> bool:
+        """Check if JSON keys appear in correct order (chunks before links).
+
+        Args:
+            response: Raw LLM response text
+
+        Returns:
+            True if chunks appears before links, False otherwise
+        """
+        # Extract the JSON portion
+        json_match = re.search(r"\{[\s\S]*\}", response)
+        if not json_match:
+            # Try the whole response
+            json_str = response
+        else:
+            json_str = json_match.group(0)
+
+        # Find positions of "chunks" and "links" keys in the raw JSON string
+        chunks_pos = json_str.find('"chunks"')
+        links_pos = json_str.find('"links"')
+
+        if chunks_pos == -1 or links_pos == -1:
+            return False
+
+        return chunks_pos < links_pos

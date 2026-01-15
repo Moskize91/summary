@@ -1,6 +1,11 @@
 """Working memory manager for cognitive chunks."""
 
+from typing import TYPE_CHECKING
+
 from .cognitive_chunk import CognitiveChunk
+
+if TYPE_CHECKING:
+    from .extractor import ExtractionResult
 
 
 class WorkingMemory:
@@ -46,6 +51,82 @@ class WorkingMemory:
         scored_chunks.sort(key=lambda x: x[1], reverse=True)
 
         self._chunks = [chunk for chunk, _ in scored_chunks[: self.capacity]]
+
+    def add_chunks_with_links(
+        self, extraction_result: "ExtractionResult"
+    ) -> tuple[list[CognitiveChunk], list[tuple[int, int]]]:
+        """Add new chunks with link processing to working memory.
+
+        Args:
+            extraction_result: ExtractionResult from extractor
+
+        Returns:
+            Tuple of (added_chunks, edges) where edges is list of (from_id, to_id) tuples
+        """
+        # Increment generation first
+        self._generation += 1
+
+        # Create temp_id to chunk mapping
+        temp_id_map = {}
+
+        # Assign IDs and generation to new chunks
+        for chunk, temp_id in zip(extraction_result.chunks, extraction_result.temp_ids):
+            chunk.id = self._next_id
+            chunk.generation = self._generation
+            temp_id_map[temp_id] = chunk
+            self._next_id += 1
+
+        # Process links and build chunk.links arrays + collect edges
+        edges = []
+        for link in extraction_result.links:
+            from_ref = link["from"]
+            to_ref = link["to"]
+
+            # Resolve "from" reference
+            if isinstance(from_ref, str):
+                # temp_id reference
+                from_chunk = temp_id_map.get(from_ref)
+                if from_chunk is None:
+                    print(f"Warning: temp_id '{from_ref}' not found in extracted chunks")
+                    continue
+                from_id = from_chunk.id
+            else:
+                # Working memory ID reference
+                from_id = from_ref
+
+            # Resolve "to" reference
+            if isinstance(to_ref, str):
+                # temp_id reference
+                to_chunk = temp_id_map.get(to_ref)
+                if to_chunk is None:
+                    print(f"Warning: temp_id '{to_ref}' not found in extracted chunks")
+                    continue
+                to_id = to_chunk.id
+            else:
+                # Working memory ID reference
+                to_id = to_ref
+
+            # Add link to the "to" chunk's links array
+            # (meaning "to" chunk is linked FROM "from" chunk)
+            for chunk in extraction_result.chunks:
+                if chunk.id == to_id:
+                    if from_id not in chunk.links:
+                        chunk.links.append(from_id)
+                    break
+
+            # Collect edge for later addition to knowledge graph
+            edges.append((from_id, to_id))
+
+        # Merge new and existing chunks for working memory
+        all_chunks = self._chunks + extraction_result.chunks
+
+        # Calculate scores and keep top-k
+        scored_chunks = [(chunk, self._calculate_score(chunk, all_chunks)) for chunk in all_chunks]
+        scored_chunks.sort(key=lambda x: x[1], reverse=True)
+
+        self._chunks = [chunk for chunk, _ in scored_chunks[: self.capacity]]
+
+        return extraction_result.chunks, edges
 
     def _calculate_score(self, chunk: CognitiveChunk, all_chunks: list[CognitiveChunk]) -> float:
         """Calculate importance score for a chunk.

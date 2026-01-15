@@ -65,26 +65,47 @@ def main():
 
         # Extract chunks
         print("\nExtracting cognitive chunks...")
-        new_chunks = extractor.extract_chunks(text_segment, working_memory)
+        extraction_result = extractor.extract_chunks(text_segment, working_memory)
 
-        if new_chunks:
-            print(f"\nExtracted {len(new_chunks)} new chunks:")
-            for chunk in new_chunks:
-                print(f"  - [{chunk.label}] {chunk.content[:80]}... (links: {chunk.links})")
-
-            # Add to working memory
-            working_memory.add_chunks(new_chunks)
-
-            # Add to knowledge graph
-            for chunk in new_chunks:
-                knowledge_graph.add_node(
-                    chunk.id, generation=chunk.generation, label=chunk.label, content=chunk.content
-                )
-                for link_id in chunk.links:
-                    if knowledge_graph.has_node(link_id):
-                        knowledge_graph.add_edge(link_id, chunk.id)
-        else:
+        if extraction_result is None:
             print("\nNo chunks extracted (LLM failed or returned empty)")
+            continue
+
+        # Check if JSON key order was correct
+        if not extraction_result.order_correct:
+            print("\n⚠️  WARNING: JSON key order was incorrect (links before chunks)")
+            print("   The LLM should output 'chunks' first, then 'links'")
+            print("   This extraction will still be processed, but consider retrying")
+            print("   if this happens frequently.")
+
+        if extraction_result.chunks:
+            print(f"\nExtracted {len(extraction_result.chunks)} new chunks:")
+            for chunk, temp_id in zip(extraction_result.chunks, extraction_result.temp_ids):
+                print(f"  - (temp_id: {temp_id}) [{chunk.label}] {chunk.content[:80]}...")
+
+            # Process links and add to working memory
+            added_chunks, edges = working_memory.add_chunks_with_links(extraction_result)
+
+            # Add nodes to knowledge graph with assigned IDs
+            for chunk in added_chunks:
+                knowledge_graph.add_node(
+                    chunk.id,
+                    generation=chunk.generation,
+                    label=chunk.label,
+                    content=chunk.content,
+                )
+
+            # Add edges to knowledge graph
+            for from_id, to_id in edges:
+                knowledge_graph.add_edge(from_id, to_id)
+
+            print(f"\nProcessed {len(edges)} links:")
+            for from_id, to_id in edges:
+                print(f"  - {from_id} -> {to_id}")
+
+            print(f"\nAdded {len(added_chunks)} chunks to knowledge graph")
+        else:
+            print("\nNo chunks extracted from this segment")
 
     print(f"\n\n{'=' * 60}")
     print("=== Final Results ===")
@@ -106,9 +127,7 @@ def main():
         pagerank_scores = nx.pagerank(knowledge_graph, alpha=0.85)
 
         # Sort nodes by PageRank score
-        sorted_nodes = sorted(
-            pagerank_scores.items(), key=lambda x: x[1], reverse=True
-        )
+        sorted_nodes = sorted(pagerank_scores.items(), key=lambda x: x[1], reverse=True)
 
         # Extract top N anchors (default: 10 or 20% of nodes, whichever is smaller)
         num_anchors = min(10, max(1, knowledge_graph.number_of_nodes() // 5))
