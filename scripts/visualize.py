@@ -33,11 +33,11 @@ def main():
     # Detect snakes using greedy merging algorithm
     print("\nDetecting thematic chains (snakes)...")
     detector = SnakeDetector(
-        max_hops=3,  # Ink diffusion range
-        stop_ratio=0.3,  # Force stop at 30% of initial nodes
+        max_hops=100000,  # Use very large value to capture all edges (effectively unlimited)
+        stop_ratio=0.15,  # Stop at 15% of initial nodes
         brake_ratio=0.7,  # Start checking value drop at 70%
         value_drop_threshold=0.5,  # Stop if value drops below 50% of previous
-        min_cluster_size=3,  # Minimum snake length (filter out pairs)
+        min_cluster_size=2,  # Minimum snake length (include pairs)
         distance_metric="max",  # Use max distance between clusters
     )
     snakes = detector.detect_snakes(graph)

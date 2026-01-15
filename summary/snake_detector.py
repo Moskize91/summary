@@ -36,6 +36,10 @@ class MergeConfig:
     enable_bonus: bool = False  # Enable bonus for large+singleton merges
     bonus_threshold: int = 3  # Minimum size for "large" cluster
     bonus_amount: float = 0.45  # Bonus multiplier (45% boost)
+    # Size-based penalty (Phase 2)
+    enable_size_penalty: bool = False  # Enable size-based penalty to avoid large snakes
+    size_penalty_alpha: float = 0.7  # Controls total size penalty strength
+    size_penalty_beta: float = 0.4  # Controls imbalance penalty strength
 
 
 class SnakeDetector:
@@ -108,7 +112,7 @@ class SnakeDetector:
         )
         clusters = self._greedy_merge(graph, fingerprints, phase1_config)
 
-        # Phase 2: Snake Merging (allow snake eating snake)
+        # Phase 2: Snake Merging (allow snake eating snake with size penalty)
         print("\n  === Phase 2: Snake Merging (Allow Snake Eating Snake) ===")
         phase2_stop_count = int(total_nodes * 0.15)
         print(f"  Target: Reduce to {phase2_stop_count} snakes ({0.15:.0%} of {total_nodes} total nodes)")
@@ -121,6 +125,9 @@ class SnakeDetector:
             brake_ratio=0.0,  # Disabled
             value_drop_threshold=0.0,  # Disabled
             enable_bonus=False,  # Disable - allow snake eating snake
+            enable_size_penalty=True,  # Enable size-based penalty
+            size_penalty_alpha=0.7,  # Penalize oversized merges
+            size_penalty_beta=0.4,  # Penalize imbalanced merges
         )
         clusters = self._greedy_merge(graph, fingerprints, phase2_config, initial_clusters=clusters)
 
@@ -283,6 +290,48 @@ class SnakeDetector:
         else:
             raise ValueError(f"Unknown distance metric: {self.distance_metric}")
 
+    def _apply_size_penalty(
+        self,
+        original_value: float,
+        size_u: int,
+        size_v: int,
+        avg_size: float,
+        config: MergeConfig,
+    ) -> float:
+        """Apply size-based penalty to merge value.
+
+        Penalizes large snake merges, encourages small snake merges.
+
+        Args:
+            original_value: Original edge value (-distance)
+            size_u: Size of cluster u
+            size_v: Size of cluster v
+            avg_size: Current average cluster size
+            config: Merge configuration with penalty parameters
+
+        Returns:
+            Adjusted value with penalty applied
+        """
+        if not config.enable_size_penalty:
+            return original_value
+
+        size_sum = size_u + size_v
+        size_diff = abs(size_u - size_v)
+
+        # 1. Total size penalty - penalize oversized merges
+        # Ideal: size_sum ≈ 2 * avg_size
+        size_ratio = size_sum / (2 * avg_size) if avg_size > 0 else 1.0
+        sum_factor = np.exp(-config.size_penalty_alpha * max(0, size_ratio - 1))
+
+        # 2. Balance penalty - penalize imbalanced merges
+        diff_ratio = size_diff / size_sum if size_sum > 0 else 0
+        balance_factor = 1 - config.size_penalty_beta * diff_ratio
+
+        # 3. Combined penalty
+        penalty = sum_factor * balance_factor
+
+        return original_value * penalty
+
     def _greedy_merge(
         self,
         graph: nx.DiGraph,
@@ -325,10 +374,9 @@ class SnakeDetector:
                         if n1 != n2 and dynamic_graph.has_edge(n1, n2):
                             dynamic_graph.remove_edge(n1, n2)
 
-            # Recompute fingerprints with current dynamic graph
-            for node_id in graph.nodes():
-                signature = self._compute_diffusion_signature(dynamic_graph, node_id)
-                fingerprints[node_id] = self._signature_to_fingerprint(signature)
+            # Note: Do NOT recompute fingerprints here!
+            # Fingerprints should remain based on the original graph structure.
+            # dynamic_graph is only used for connectivity checks (_clusters_connected).
 
         initial_count = len(clusters)
 
@@ -347,6 +395,9 @@ class SnakeDetector:
 
         print(f"  Initial clusters: {initial_count}, stop at: {stop_count}, brake at: {brake_count}")
 
+        # Calculate initial average size for penalty computation
+        total_nodes = len(graph.nodes())
+
         # Build initial edge values
         edge_heap = []
         edge_set = set()  # Track which edges exist
@@ -360,6 +411,18 @@ class SnakeDetector:
 
                 dist = self._compute_cluster_distance(clusters[cluster_u], clusters[cluster_v], fingerprints)
                 value = -dist  # Negative distance = higher value for smaller distance
+
+                # Apply size penalty if enabled
+                if config.enable_size_penalty:
+                    avg_size = total_nodes / len(clusters)
+                    value = self._apply_size_penalty(
+                        value,
+                        len(clusters[cluster_u]),
+                        len(clusters[cluster_v]),
+                        avg_size,
+                        config,
+                    )
+
                 heapq.heappush(edge_heap, (-value, (cluster_u, cluster_v)))  # Max heap using negative value
                 edge_set.add((cluster_u, cluster_v))
 
@@ -443,13 +506,11 @@ class SnakeDetector:
                 if dynamic_graph.has_edge(*edge):  # Double-check before removal
                     dynamic_graph.remove_edge(*edge)
 
-            # Step 3: Recompute fingerprints for ALL nodes (global update)
-            # This ensures all nodes see the removal of internal edges
-            for node_id in graph.nodes():
-                signature = self._compute_diffusion_signature(dynamic_graph, node_id)
-                fingerprints[node_id] = self._signature_to_fingerprint(signature)
+            # Note: Do NOT recompute fingerprints here!
+            # Fingerprints remain based on the original graph.
+            # Only dynamic_graph is modified for connectivity checks.
 
-            # Step 4: Update edges involving merged cluster
+            # Step 3: Update edges involving merged cluster
             neighbors = set()
             for node in merged_nodes:
                 if node in graph:
@@ -465,6 +526,17 @@ class SnakeDetector:
                 # Compute new distance between merged cluster and neighbor cluster
                 new_dist = self._compute_cluster_distance(clusters[cluster_u], clusters[neighbor_cluster], fingerprints)
                 new_value = -new_dist
+
+                # Apply size penalty if enabled
+                if config.enable_size_penalty:
+                    avg_size = total_nodes / len(clusters)
+                    new_value = self._apply_size_penalty(
+                        new_value,
+                        len(clusters[cluster_u]),
+                        len(clusters[neighbor_cluster]),
+                        avg_size,
+                        config,
+                    )
 
                 # Add to heap (old edges will be filtered out by the check above)
                 heapq.heappush(edge_heap, (-new_value, (cluster_u, neighbor_cluster)))
