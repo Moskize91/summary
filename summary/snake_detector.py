@@ -1,6 +1,6 @@
 """Snake detection using greedy edge merging with topological fingerprints.
 
-Simplified Two-Phase Algorithm:
+Two-Phase Algorithm:
 
 Phase 1: Snake Forming (Forbid Snake Eating Snake)
 - Allow snakes to absorb isolated nodes
@@ -13,9 +13,10 @@ Phase 2: Snake Merging (Allow Snake Eating Snake)
 
 Design Principles:
 1. Input MUST be a weakly connected graph (use split_connected_components first)
-2. max_hops is effectively infinite - all nodes collect all edges
-3. All nodes have IDENTICAL fingerprints (all edges in the graph)
-4. Distance is computed based on which edges are internal vs external to clusters
+2. All nodes have fingerprints with IDENTICAL structure (same edges) but DIFFERENT values
+3. Fingerprint values are distances from node to each edge (ink diffusion without decay)
+4. Distance metric is the diameter of merged cluster (maximum pairwise distance)
+5. Diameter-based distance creates natural self-correction without artificial limits
 """
 
 import heapq
@@ -48,11 +49,7 @@ class MergeConfig:
     """Configuration for one merge phase."""
 
     stop_count: int | None = None  # Absolute number of clusters to stop at
-    enable_bonus: bool = False  # Enable bonus for snake+singleton merges
-    enable_size_penalty: bool = False  # Enable size-based penalty
-    size_penalty_alpha: float = 0.7  # Total size penalty strength
-    size_penalty_beta: float = 0.4  # Imbalance penalty strength
-    max_snake_size: int | None = None  # Maximum size for any snake (None = no limit)
+    enable_bonus: bool = False  # Enable bonus for snake+singleton merges (forbid snake eating snake)
 
 
 class SnakeDetector:
@@ -239,49 +236,6 @@ class SnakeDetector:
 
         return max_distance
 
-    def _apply_size_penalty(
-        self,
-        value: float,
-        size_a: int,
-        size_b: int,
-        avg_size: float,
-        config: MergeConfig,
-    ) -> float:
-        """Apply size-based penalty to merge value.
-
-        Args:
-            value: Original merge value
-            size_a: Size of cluster A
-            size_b: Size of cluster B
-            avg_size: Average cluster size
-            config: Merge configuration
-
-        Returns:
-            Penalized value
-        """
-        total_size = size_a + size_b
-        larger = max(size_a, size_b)
-        smaller = min(size_a, size_b)
-
-        # 1. Penalty for large total size
-        if avg_size > 0:
-            size_ratio = total_size / avg_size
-            sum_factor = 1.0 / (1.0 + config.size_penalty_alpha * max(0, size_ratio - 1.0))
-        else:
-            sum_factor = 1.0
-
-        # 2. Penalty for imbalance
-        if larger > 0:
-            balance_ratio = smaller / larger
-            balance_factor = config.size_penalty_beta + (1.0 - config.size_penalty_beta) * balance_ratio
-        else:
-            balance_factor = 1.0
-
-        # 3. Combined penalty
-        penalty = sum_factor * balance_factor
-
-        return value * penalty
-
     def _greedy_merge(
         self,
         graph: nx.DiGraph,
@@ -318,9 +272,6 @@ class SnakeDetector:
 
         print(f"  Initial clusters: {initial_count}, stop at: {stop_count}")
 
-        # Calculate initial average size
-        total_nodes = len(graph.nodes())
-
         # Build initial edge heap
         edge_heap = []
         edge_set = set()
@@ -334,17 +285,6 @@ class SnakeDetector:
 
                 dist = self._compute_distance(clusters[cluster_u], clusters[cluster_v], graph, fingerprints)
                 value = -dist  # Negative distance for max heap
-
-                # Apply size penalty if enabled
-                if config.enable_size_penalty:
-                    avg_size = total_nodes / len(clusters)
-                    value = self._apply_size_penalty(
-                        value,
-                        len(clusters[cluster_u]),
-                        len(clusters[cluster_v]),
-                        avg_size,
-                        config,
-                    )
 
                 heapq.heappush(edge_heap, (-value, (cluster_u, cluster_v)))
                 edge_set.add((cluster_u, cluster_v))
@@ -374,15 +314,6 @@ class SnakeDetector:
                 if both_snakes:
                     continue  # Skip this merge
 
-            # Check max snake size limit
-            if config.max_snake_size is not None:
-                size_u = len(clusters[cluster_u])
-                size_v = len(clusters[cluster_v])
-                merged_size = size_u + size_v
-
-                if merged_size > config.max_snake_size:
-                    continue  # Skip this merge
-
             # Merge operation
             clusters[cluster_u].extend(clusters[cluster_v])
             for node in clusters[cluster_v]:
@@ -406,17 +337,6 @@ class SnakeDetector:
                 # Compute new distance
                 new_dist = self._compute_distance(clusters[cluster_u], clusters[neighbor_cluster], graph, fingerprints)
                 new_value = -new_dist
-
-                # Apply size penalty if enabled
-                if config.enable_size_penalty:
-                    avg_size = total_nodes / len(clusters)
-                    new_value = self._apply_size_penalty(
-                        new_value,
-                        len(clusters[cluster_u]),
-                        len(clusters[neighbor_cluster]),
-                        avg_size,
-                        config,
-                    )
 
                 # Add to heap
                 if cluster_u < neighbor_cluster:
