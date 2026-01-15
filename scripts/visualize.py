@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dev.snake_detector import SnakeDetector, load_graph_from_json, save_snakes_to_json
 from dev.visualize_snakes import visualize_snakes
+from summary.edge_importance import EdgeImportanceCalculator
 from summary.snake_detector import split_connected_components
 
 
@@ -66,9 +67,19 @@ def main():
     else:
         print("No snakes detected (all nodes will be shown in gray)")
 
+    # Calculate edge importance
+    print("\nCalculating edge importance...")
+    calculator = EdgeImportanceCalculator(graph)
+    edge_importance = calculator.compute_combined_importance()
+
+    # Show some statistics
+    scores = list(edge_importance.values())
+    print(f"  Edge importance range: [{min(scores):.3f}, {max(scores):.3f}]")
+    print(f"  Mean importance: {sum(scores) / len(scores):.3f}")
+
     # Generate visualization
     print("\nGenerating visualization...")
-    visualize_snakes(graph, snakes, output_path, graph_data)
+    visualize_snakes(graph, snakes, output_path, graph_data, edge_importance)
 
 
 if __name__ == "__main__":

@@ -8,14 +8,21 @@ import networkx as nx
 from graphviz import Digraph
 
 
-def visualize_snakes(graph: nx.DiGraph, snakes: list[list[int]], output_path: Path, graph_data: dict) -> None:
-    """Generate visualization with color-coded snakes.
+def visualize_snakes(
+    graph: nx.DiGraph,
+    snakes: list[list[int]],
+    output_path: Path,
+    graph_data: dict,
+    edge_importance: dict[frozenset, float] | None = None,
+) -> None:
+    """Generate visualization with color-coded snakes and edge importance.
 
     Args:
         graph: NetworkX graph
         snakes: List of detected snakes
         output_path: Output file path (without extension)
         graph_data: Original graph data dict for tooltips
+        edge_importance: Optional dict mapping edge (frozenset) to importance score [0.0, 1.0]
     """
     # Create graphviz digraph
     dot = Digraph(comment="Knowledge Graph with Snakes", format="svg")
@@ -147,18 +154,30 @@ def visualize_snakes(graph: nx.DiGraph, snakes: list[list[int]], output_path: Pa
         from_node_id = edge["from"]
         to_node_id = edge["to"]
 
+        # Determine edge color and width based on snake membership and importance
+        edge_key = frozenset([from_node_id, to_node_id])
+        importance = edge_importance.get(edge_key, 0.5) if edge_importance else 0.5
+
+        # Map importance to color (0.0=light gray, 1.0=black)
+        # Use a color gradient from #CCCCCC to #000000
+        gray_value = int(204 * (1.0 - importance))  # 204 = 0xCC
+        edge_color = f"#{gray_value:02x}{gray_value:02x}{gray_value:02x}"
+
+        # Map importance to width (0.0=0.5, 1.0=3.0)
+        edge_width = 0.5 + importance * 2.5
+
         if from_node_id in node_to_snake and to_node_id in node_to_snake:
             if node_to_snake[from_node_id] == node_to_snake[to_node_id]:
-                # Same snake: use snake color with thicker edge
+                # Same snake: use snake color with importance-based width
                 snake_id = node_to_snake[from_node_id]
-                color = colors[snake_id % len(colors)]
-                dot.edge(to_id, from_id, color=color, penwidth="2.5")
+                snake_color = colors[snake_id % len(colors)]
+                dot.edge(to_id, from_id, color=snake_color, penwidth=str(edge_width))
             else:
-                # Different snakes: use default color
-                dot.edge(to_id, from_id)
+                # Different snakes: use importance-based gray color and width
+                dot.edge(to_id, from_id, color=edge_color, penwidth=str(edge_width))
         else:
-            # At least one node not in a snake: default color
-            dot.edge(to_id, from_id)
+            # At least one node not in a snake: use importance-based gray color and width
+            dot.edge(to_id, from_id, color=edge_color, penwidth=str(edge_width))
 
     # Render to SVG
     output_path_str = str(output_path.with_suffix(""))
@@ -168,14 +187,19 @@ def visualize_snakes(graph: nx.DiGraph, snakes: list[list[int]], output_path: Pa
 
     # Generate HTML wrapper
     html_path = Path(f"{output_path_str}.html")
-    _generate_html_wrapper(svg_path, html_path, graph_data, snakes, node_to_snake)
+    _generate_html_wrapper(svg_path, html_path, graph_data, snakes, node_to_snake, edge_importance)
 
     print(f"\nSnake visualization saved to: {html_path}")
     print(f"Open it in your browser: file://{html_path.resolve()}")
 
 
 def _generate_html_wrapper(
-    svg_path: Path, html_path: Path, graph_data: dict, snakes: list[list[int]], node_to_snake: dict
+    svg_path: Path,
+    html_path: Path,
+    graph_data: dict,
+    snakes: list[list[int]],
+    node_to_snake: dict,
+    edge_importance: dict[frozenset, float] | None = None,
 ) -> None:
     """Generate HTML file with interactive tooltips and snake legend.
 
@@ -185,6 +209,7 @@ def _generate_html_wrapper(
         graph_data: Graph data dict
         snakes: List of detected snakes
         node_to_snake: Mapping from node ID to snake ID
+        edge_importance: Optional edge importance scores
     """
     # Read SVG content and extract dimensions
     with open(svg_path, encoding="utf-8") as f:
@@ -251,6 +276,21 @@ def _generate_html_wrapper(
         )
 
     legend_html = "\n".join(legend_items)
+
+    # Build edge importance legend
+    edge_legend_html = ""
+    if edge_importance:
+        edge_legend_html = """
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #333;">Edge Importance</h4>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 12px; color: #666;">Low</span>
+                    <div style="flex: 1; height: 8px; background: linear-gradient(to right, #CCCCCC, #000000); border-radius: 4px;"></div>
+                    <span style="font-size: 12px; color: #666;">High</span>
+                    <span style="margin-left: 10px; font-size: 12px; color: #888;">(shown by edge thickness and darkness)</span>
+                </div>
+            </div>
+        """
 
     # Create HTML
     html_content = f"""<!DOCTYPE html>
@@ -396,6 +436,7 @@ def _generate_html_wrapper(
         <div id="legend">
             <h3>🐍 Detected Snakes (Thematic Chains)</h3>
             {legend_html}
+            {edge_legend_html}
         </div>
         <div id="svg-container">
             <div id="svg-wrapper">
