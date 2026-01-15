@@ -52,6 +52,7 @@ class MergeConfig:
     enable_size_penalty: bool = False  # Enable size-based penalty
     size_penalty_alpha: float = 0.7  # Total size penalty strength
     size_penalty_beta: float = 0.4  # Imbalance penalty strength
+    max_snake_size: int | None = None  # Maximum size for any snake (None = no limit)
 
 
 class SnakeDetector:
@@ -111,6 +112,7 @@ class SnakeDetector:
         phase1_config = MergeConfig(
             stop_count=0,  # Run until no more valid merges
             enable_bonus=True,  # Enable to forbid snake eating snake
+            # No max_snake_size limit - rely on diameter self-correction
         )
         clusters = self._greedy_merge(graph, fingerprints, phase1_config)
 
@@ -125,18 +127,15 @@ class SnakeDetector:
         phase2_config = MergeConfig(
             stop_count=phase2_stop_count,
             enable_bonus=False,  # Disable - allow snake eating snake
-            enable_size_penalty=True,  # Enable penalty
-            size_penalty_alpha=0.7,
-            size_penalty_beta=0.4,
+            # No size penalty - rely on diameter self-correction
         )
         clusters = self._greedy_merge(graph, fingerprints, phase2_config, initial_clusters=clusters)
 
-        # Step 3: Filter and sort
+        # Step 3: Filter and sort (include all clusters, even single nodes)
         snakes = []
         for cluster in clusters.values():
-            if len(cluster) >= self.min_cluster_size:
-                cluster.sort(key=lambda nid: graph.nodes[nid]["sentence_id"])
-                snakes.append(cluster)
+            cluster.sort(key=lambda nid: graph.nodes[nid]["sentence_id"])
+            snakes.append(cluster)
 
         return snakes
 
@@ -208,9 +207,10 @@ class SnakeDetector:
     def _compute_distance(
         self, cluster1: list[int], cluster2: list[int], graph: nx.DiGraph, fingerprints: dict[int, dict]
     ) -> float:
-        """Compute distance between two clusters using fingerprint vectors.
+        """Compute distance as the diameter of merged cluster.
 
-        Computes average fingerprint for each cluster, then uses Euclidean distance.
+        Distance = maximum pairwise distance within the merged cluster.
+        This creates self-correction: loose clusters have large diameter and won't easily merge.
 
         Args:
             cluster1: First cluster nodes
@@ -219,33 +219,25 @@ class SnakeDetector:
             fingerprints: Node fingerprints
 
         Returns:
-            Euclidean distance between cluster average fingerprints
+            Maximum distance between any two nodes in merged cluster (diameter)
         """
-        # Compute average fingerprint for cluster1
-        avg_fp1 = {}
-        for node in cluster1:
-            for edge, dist in fingerprints[node].items():
-                avg_fp1[edge] = avg_fp1.get(edge, 0.0) + dist
-        for edge in avg_fp1:
-            avg_fp1[edge] /= len(cluster1)
+        # Simulate merge
+        merged = cluster1 + cluster2
 
-        # Compute average fingerprint for cluster2
-        avg_fp2 = {}
-        for node in cluster2:
-            for edge, dist in fingerprints[node].items():
-                avg_fp2[edge] = avg_fp2.get(edge, 0.0) + dist
-        for edge in avg_fp2:
-            avg_fp2[edge] /= len(cluster2)
+        # Find maximum pairwise distance (diameter)
+        max_distance = 0.0
+        for i, node_i in enumerate(merged):
+            for node_j in merged[i + 1 :]:  # Avoid duplicate pairs
+                # Euclidean distance between fingerprints
+                squared_sum = 0.0
+                for edge in fingerprints[node_i]:  # All nodes have same edges
+                    diff = fingerprints[node_i][edge] - fingerprints[node_j][edge]
+                    squared_sum += diff * diff
 
-        # Euclidean distance
-        squared_sum = 0.0
-        for edge in avg_fp1:  # All edges are in both fingerprints
-            diff = avg_fp1[edge] - avg_fp2[edge]
-            squared_sum += diff * diff
+                distance = squared_sum**0.5
+                max_distance = max(max_distance, distance)
 
-        distance = squared_sum**0.5
-
-        return distance
+        return max_distance
 
     def _apply_size_penalty(
         self,
@@ -380,6 +372,15 @@ class SnakeDetector:
                 both_snakes = size_u >= 2 and size_v >= 2
 
                 if both_snakes:
+                    continue  # Skip this merge
+
+            # Check max snake size limit
+            if config.max_snake_size is not None:
+                size_u = len(clusters[cluster_u])
+                size_v = len(clusters[cluster_v])
+                merged_size = size_u + size_v
+
+                if merged_size > config.max_snake_size:
                     continue  # Skip this merge
 
             # Merge operation
