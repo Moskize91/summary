@@ -1,3 +1,9 @@
+"""DEPRECATED: This module is deprecated. Use visualize_snakes.py instead.
+
+The basic visualization without snake detection is no longer maintained.
+Use scripts/visualize.py which includes snake detection and color-coded visualization.
+"""
+
 import json
 import re
 from pathlib import Path
@@ -6,7 +12,9 @@ from graphviz import Digraph
 
 
 def generate_svg(json_path: Path, output_path: Path) -> None:
-    """Generate SVG visualization with HTML wrapper from knowledge graph JSON.
+    """DEPRECATED: Generate SVG visualization with HTML wrapper from knowledge graph JSON.
+
+    This function is deprecated. Use visualize_snakes() from dev.visualize_snakes instead.
 
     Args:
         json_path: Path to the knowledge_graph.json file
