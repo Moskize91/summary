@@ -8,6 +8,8 @@ import networkx as nx
 
 from .extractor import ChunkExtractor
 from .llm import LLM
+from .snake_detector import SnakeDetector, split_connected_components
+from .snake_summarizer import SnakeSummarizer
 from .text_chunker import TextChunker
 from .wave_reflection import WaveReflection
 from .working_memory import WorkingMemory
@@ -168,6 +170,120 @@ def main():
     print(f"\nKnowledge graph saved to: {json_output_file}")
     print(f"  - {len(graph_data['nodes'])} nodes")
     print(f"  - {len(graph_data['edges'])} edges")
+
+    # Detect snakes (thematic chains)
+    print(f"\n{'=' * 60}")
+    print("=== Snake Detection ===")
+    print(f"{'=' * 60}")
+    print("Splitting into connected components...")
+    components = split_connected_components(knowledge_graph)
+    print(f"Found {len(components)} connected component(s):")
+    for i, comp in enumerate(components):
+        print(f"  Component {i}: {len(comp.nodes())} nodes, {len(comp.edges())} edges")
+
+    print("\nDetecting thematic chains (snakes)...")
+    detector = SnakeDetector(
+        min_cluster_size=2,  # Minimum snake length
+        phase2_stop_ratio=0.15,  # Phase 2 stops at 15% of component nodes
+    )
+
+    all_snakes = []
+    for i, component in enumerate(components):
+        print(f"\nProcessing Component {i}:")
+        component_snakes = detector.detect_snakes(component)
+        all_snakes.extend(component_snakes)
+
+    if all_snakes:
+        print(f"\nFound {len(all_snakes)} snakes:")
+        for i, snake in enumerate(all_snakes):
+            first_node = knowledge_graph.nodes[snake[0]]
+            last_node = knowledge_graph.nodes[snake[-1]]
+            print(f"  Snake {i}: {len(snake)} nodes - {first_node['label']} → {last_node['label']}")
+
+        # Save snakes
+        snakes_output = output_dir / "snakes.json"
+        snakes_data = []
+        for i, snake in enumerate(all_snakes):
+            snake_nodes = []
+            for node_id in snake:
+                node_data = knowledge_graph.nodes[node_id]
+                snake_nodes.append(
+                    {
+                        "id": node_id,
+                        "sentence_id": node_data["sentence_id"],
+                        "label": node_data["label"],
+                    }
+                )
+            snakes_data.append({"snake_id": i, "size": len(snake), "nodes": snake_nodes})
+
+        with open(snakes_output, "w", encoding="utf-8") as f:
+            json.dump(snakes_data, f, ensure_ascii=False, indent=2)
+        print(f"\nSnakes saved to: {snakes_output}")
+
+        # Summarize snakes with LLM
+        print(f"\n{'=' * 60}")
+        print("=== Snake Summarization ===")
+        print(f"{'=' * 60}")
+        prompt_file = data_dir / "snake_summary_prompt.jinja"
+        summarizer = SnakeSummarizer(llm, prompt_file)
+
+        print(f"Generating summaries for {len(all_snakes)} snakes...")
+        snake_summaries = summarizer.summarize_all_snakes(all_snakes, knowledge_graph)
+
+        # Save summaries
+        summaries_output = output_dir / "snake_summaries.json"
+        with open(summaries_output, "w", encoding="utf-8") as f:
+            json.dump(snake_summaries, f, ensure_ascii=False, indent=2)
+
+        print(f"\nSnake summaries saved to: {summaries_output}")
+        print("\nSample summaries:")
+        for summary in snake_summaries[:3]:  # Show first 3
+            print(f"\n  Snake {summary['snake_id']}: {summary['first_label']} → {summary['last_label']}")
+            print(f"  Summary: {summary['summary'][:100]}...")
+
+        # Build snake-level graph with edges
+        print(f"\n{'=' * 60}")
+        print("=== Building Snake Graph ===")
+        print(f"{'=' * 60}")
+
+        # Calculate edge importance
+        calculator = EdgeImportanceCalculator(knowledge_graph)
+        edge_importance = calculator.compute_combined_importance()
+
+        # Build snake graph
+        builder = SnakeGraphBuilder()
+        snake_graph = builder.build_snake_graph(all_snakes, knowledge_graph, edge_importance)
+
+        print(f"Snake graph: {len(snake_graph.nodes())} snakes, {len(snake_graph.edges())} inter-snake edges")
+
+        # Save snake edges
+        edges_output = output_dir / "snake_edges.json"
+        edges_data = []
+        for edge in snake_graph.edges():
+            snake_from, snake_to = edge
+            edge_data = snake_graph.edges[edge]
+
+            from_node = knowledge_graph.nodes[all_snakes[snake_from][0]]
+            to_node = knowledge_graph.nodes[all_snakes[snake_to][0]]
+
+            edges_data.append({
+                "from_snake": snake_from,
+                "to_snake": snake_to,
+                "from_label": from_node["label"],
+                "to_label": to_node["label"],
+                "importance": edge_data["importance"],
+                "internal_edge_count": edge_data["internal_edge_count"]
+            })
+
+        with open(edges_output, "w", encoding="utf-8") as f:
+            json.dump(edges_data, f, ensure_ascii=False, indent=2)
+
+        print(f"\nSnake edges saved to: {edges_output}")
+        print(f"Sample edges:")
+        for edge_info in edges_data[:5]:
+            print(f"  Snake {edge_info['from_snake']} ({edge_info['from_label']}) -> Snake {edge_info['to_snake']} ({edge_info['to_label']})")
+    else:
+        print("\nNo snakes detected")
 
 
 if __name__ == "__main__":
