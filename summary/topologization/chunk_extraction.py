@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from ..llm import LLM
+from ..text import normalize_text
 from .cognitive_chunk import ChunkBatch, CognitiveChunk
 from .fragment import SentenceId
 from .working_memory import WorkingMemory
@@ -93,9 +94,7 @@ class ChunkExtractor:
                             seen_ids.add(sid)
                     else:
                         # If no exact match, try fuzzy matching
-                        matched_ids = self._fuzzy_match_sentence(
-                            source_sent, chunk_sentence_texts, sentence_text_to_id
-                        )
+                        matched_ids = self._fuzzy_match_sentence(source_sent, chunk_sentence_texts, sentence_text_to_id)
                         for matched_id in matched_ids:
                             if matched_id not in seen_ids:
                                 matched_sentence_ids.append(matched_id)
@@ -105,6 +104,7 @@ class ChunkExtractor:
                 if not matched_sentence_ids:
                     fallback_id = min(chunk_sentence_ids) if chunk_sentence_ids else (0, 0)
                     matched_sentence_ids = [fallback_id]
+                    # TODO: 应该直接报错，要求 AI 重新提供。我都这么严格的方式，都没发匹配，肯定有问题的。
                     print(f"[[WARNING]] Failed to match source_sentences for chunk '{data.get('label', 'unknown')}'")
                     print(f"  Source sentences: {source_sentences[:1]}...")  # Show first source sentence
                     print(f"  Using fallback sentence_id: {fallback_id}")
@@ -218,50 +218,45 @@ class ChunkExtractor:
         Returns:
             List of matched sentence IDs (may be multiple if source contains multiple sentences)
         """
-        # Normalize source sentence (strip whitespace, remove newlines)
-        normalized_source = source_sent.strip().replace('\n', ' ').lower()
+        # Normalize using robust text normalization (handles punctuation, spaces, accents, etc.)
+        source_clean = normalize_text(source_sent)
 
         matched_ids = []
 
         for candidate in candidate_texts:
-            normalized_candidate = candidate.strip().replace('\n', ' ').lower()
+            candidate_clean = normalize_text(candidate)
 
-            # Check if they are exactly the same
-            if normalized_source == normalized_candidate:
+            # Check if they are exactly the same after normalization
+            if source_clean == candidate_clean:
                 return [text_to_id[candidate]]
 
-            # Check if candidate is a substring of source (LLM merged multiple sentences)
-            # Use a similarity threshold to handle minor variations
-            if len(normalized_candidate) >= 20:  # Only for substantial text
-                # Remove common punctuation and spaces for comparison
-                source_clean = (
-                    normalized_source.replace(' ', '')
-                    .replace('，', '')
-                    .replace('。', '')
-                    .replace('、', '')
-                )
-                candidate_clean = (
-                    normalized_candidate.replace(' ', '')
-                    .replace('，', '')
-                    .replace('。', '')
-                    .replace('、', '')
-                )
+            # Skip if either is too short
+            if len(source_clean) < 20 or len(candidate_clean) < 20:
+                continue
 
-                # Check if candidate appears in source (with 90% character match)
-                if len(candidate_clean) > 0:
-                    # Find longest common substring length
-                    match_len = 0
-                    for i in range(len(source_clean)):
-                        for j in range(len(candidate_clean)):
-                            k = 0
-                            while (i + k < len(source_clean) and
-                                   j + k < len(candidate_clean) and
-                                   source_clean[i + k] == candidate_clean[j + k]):
-                                k += 1
-                            match_len = max(match_len, k)
+            # Check substring containment (both directions)
+            if source_clean in candidate_clean or candidate_clean in source_clean:
+                matched_ids.append(text_to_id[candidate])
+                continue
 
-                    similarity = match_len / len(candidate_clean)
-                    if similarity >= 0.8:  # 80% similarity threshold
-                        matched_ids.append(text_to_id[candidate])
+            # Use longest common substring for fuzzy matching
+            match_len = 0
+            for i in range(len(source_clean)):
+                for j in range(len(candidate_clean)):
+                    k = 0
+                    while (
+                        i + k < len(source_clean)
+                        and j + k < len(candidate_clean)
+                        and source_clean[i + k] == candidate_clean[j + k]
+                    ):
+                        k += 1
+                    match_len = max(match_len, k)
+
+            # Calculate similarity against the shorter string (more lenient)
+            min_len = min(len(source_clean), len(candidate_clean))
+            similarity = match_len / min_len if min_len > 0 else 0
+
+            if similarity >= 0.8:  # 80% similarity threshold
+                matched_ids.append(text_to_id[candidate])
 
         return matched_ids if matched_ids else []
