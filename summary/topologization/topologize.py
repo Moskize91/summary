@@ -12,7 +12,6 @@ from .chunk_extraction import ChunkExtractor
 from .cognitive_chunk import CognitiveChunk
 from .snake_detector import SnakeDetector, split_connected_components
 from .snake_graph_builder import SnakeGraphBuilder
-from .snake_summarizer import SnakeSummarizer
 from .storage import FragmentWriter
 from .text_chunker import TextChunker
 from .wave_reflection import WaveReflection
@@ -113,16 +112,11 @@ def topologize(
     print("=== Phase 2: Thematic Chain Detection ===")
     print(f"{'=' * 60}")
 
-    snakes, snake_summaries, snake_graph = _analyze_snakes(
-        knowledge_graph,
-        all_chunks,
-        config,
-        llm,
-    )
+    snakes, snake_graph = _analyze_snakes(knowledge_graph, config)
 
     # Step 8: Save snakes to database
     print("\nSaving snakes to database...")
-    _save_snakes(conn, snakes, snake_summaries, snake_graph, knowledge_graph)
+    _save_snakes(conn, snakes, snake_graph, knowledge_graph)
 
     conn.close()
 
@@ -292,23 +286,7 @@ def _save_knowledge_graph(
         database.insert_edge(conn, from_id, to_id)
 
 
-def _analyze_snakes(
-    knowledge_graph: nx.DiGraph,
-    _all_chunks: list[CognitiveChunk],
-    config: TopologizationConfig,
-    llm: LLM,
-) -> tuple[list[list[int]], list[dict], nx.DiGraph]:
-    """Detect snakes and generate summaries.
-
-    Args:
-        knowledge_graph: Knowledge graph
-        _all_chunks: All chunks (unused, reserved for future use)
-        config: Pipeline configuration
-        llm: LLM instance
-
-    Returns:
-        Tuple of (snakes, snake_summaries, snake_graph)
-    """
+def _analyze_snakes(knowledge_graph: nx.DiGraph, config: TopologizationConfig) -> tuple[list[list[int]], nx.DiGraph]:
     # Split into connected components
     print("\nSplitting into connected components...")
     components = split_connected_components(knowledge_graph)
@@ -331,18 +309,9 @@ def _analyze_snakes(
 
     if not all_snakes:
         print("No snakes detected")
-        return [], [], nx.DiGraph()
+        return [], nx.DiGraph()
 
     print(f"\nFound {len(all_snakes)} snakes")
-
-    # Summarize snakes
-    print("\nGenerating snake summaries...")
-    summarizer = SnakeSummarizer(llm)
-    snake_summaries = summarizer.summarize_all_snakes(all_snakes, knowledge_graph)
-
-    for summary in snake_summaries:
-        print(f"\n  Snake {summary['snake_id']}: {summary['first_label']} → {summary['last_label']}")
-        print(f"  Summary: {summary['summary'][:100]}...")
 
     # Build snake graph
     print(f"\n{'=' * 60}")
@@ -354,13 +323,12 @@ def _analyze_snakes(
 
     print(f"Snake graph: {len(snake_graph.nodes())} snakes, {len(snake_graph.edges())} inter-snake edges")
 
-    return all_snakes, snake_summaries, snake_graph
+    return all_snakes, snake_graph
 
 
 def _save_snakes(
     conn: sqlite3.Connection,
     snakes: list[list[int]],
-    snake_summaries: list[dict],
     snake_graph: nx.DiGraph,
     knowledge_graph: nx.DiGraph,
 ):
@@ -369,7 +337,6 @@ def _save_snakes(
     Args:
         conn: Database connection
         snakes: List of snakes
-        snake_summaries: Snake summaries
         snake_graph: Snake graph
         knowledge_graph: Knowledge graph (for node attributes)
     """
@@ -389,14 +356,6 @@ def _save_snakes(
         # Save snake-chunk associations
         for position, chunk_id in enumerate(snake):
             database.insert_snake_chunk(conn, snake_id, chunk_id, position)
-
-    # Save snake summaries
-    for summary in snake_summaries:
-        database.insert_snake_summary(
-            conn,
-            summary["snake_id"],
-            summary["summary"],
-        )
 
     # Save snake edges
     for from_snake, to_snake in snake_graph.edges():

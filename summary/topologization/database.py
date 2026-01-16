@@ -75,15 +75,6 @@ def create_schema(conn: sqlite3.Connection):
         )
     """)
 
-    # Snake summaries table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS snake_summaries (
-            snake_id INTEGER PRIMARY KEY,
-            summary TEXT NOT NULL,
-            FOREIGN KEY (snake_id) REFERENCES snakes(snake_id)
-        )
-    """)
-
     # Snake edges table (inter-snake connections)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS snake_edges (
@@ -210,29 +201,6 @@ def insert_snake_chunk(
         VALUES (?, ?, ?)
         """,
         (snake_id, chunk_id, position),
-    )
-    conn.commit()
-
-
-def insert_snake_summary(
-    conn: sqlite3.Connection,
-    snake_id: int,
-    summary: str,
-):
-    """Insert snake summary.
-
-    Args:
-        conn: SQLite database connection
-        snake_id: Snake ID
-        summary: LLM-generated summary text
-    """
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO snake_summaries (snake_id, summary)
-        VALUES (?, ?)
-        """,
-        (snake_id, summary),
     )
     conn.commit()
 

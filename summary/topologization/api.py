@@ -101,24 +101,7 @@ class Snake:
     first_label: str
     last_label: str
     _topologization: "Topologization" = field(repr=False)
-    _summary: str | None = field(default=None, repr=False)  # Lazy-loaded
     _chunk_ids: list[int] | None = field(default=None, repr=False)  # Lazy-loaded
-
-    @property
-    def summary(self) -> str:
-        """Lazy-load LLM-generated summary from database.
-
-        Returns:
-            Summary text
-        """
-        if self._summary is None:
-            cursor = self._topologization._conn.execute(
-                "SELECT summary FROM snake_summaries WHERE snake_id = ?",
-                (self.snake_id,),
-            )
-            row = cursor.fetchone()
-            self._summary = row[0] if row else ""
-        return self._summary or ""
 
     @property
     def chunk_ids(self) -> list[int]:
