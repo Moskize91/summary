@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+from .storage import SentenceId
+
 
 @dataclass
 class CognitiveChunk:
@@ -12,9 +14,10 @@ class CognitiveChunk:
 
     id: int
     generation: int
-    sentence_id: int  # Minimum sentence ID from source text (for ordering)
+    sentence_id: SentenceId  # Primary sentence ID (first sentence, for ordering)
     label: str  # Short summary (5-15 chars) for quick scanning
     content: str  # Full content
+    sentence_ids: list[SentenceId] = field(default_factory=list)  # All sentence IDs that comprise this chunk
     links: list[int] = field(default_factory=list)
 
     def __repr__(self) -> str:

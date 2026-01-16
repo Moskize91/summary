@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .llm import LLM
 from .template import create_env
-from .topologization.core import PipelineConfig, TopologizationPipeline
+from .topologization import TopologizationConfig, topologize
 
 
 def main(args: list[str] | None = None) -> int:
@@ -39,17 +39,17 @@ def main(args: list[str] | None = None) -> int:
     )
 
     parser.add_argument(
-        "--output",
+        "--workspace",
         type=Path,
-        default=Path("output"),
-        help="Output directory for results",
+        default=Path("workspace"),
+        help="Workspace directory for storing fragments and database",
     )
 
     parser.add_argument(
         "--log",
         type=Path,
         default=None,
-        help="Log directory for LLM logs (default: output/logs)",
+        help="Log directory for LLM logs (default: logs/)",
     )
 
     parser.add_argument(
@@ -119,10 +119,10 @@ def main(args: list[str] | None = None) -> int:
         print(f"Error: Config file not found: {parsed_args.config}", file=sys.stderr)
         return 1
 
-    # Setup log directory (default to output/logs if not specified)
+    # Setup log directory (default to logs/ if not specified)
     log_dir = parsed_args.log
     if log_dir is None:
-        log_dir = parsed_args.output / "logs"
+        log_dir = Path("logs")
 
     # Setup cache directory
     cache_dir = parsed_args.cache
@@ -155,9 +155,7 @@ def main(args: list[str] | None = None) -> int:
     jinja_env = create_env(data_dir)
 
     # Create pipeline configuration
-    config = PipelineConfig(
-        input_file=parsed_args.input_file,
-        output_dir=parsed_args.output,
+    config = TopologizationConfig(
         extraction_prompt_file=extraction_prompt_file,
         snake_summary_prompt_file=snake_summary_prompt_file,
         max_chunk_length=parsed_args.chunk_length,
@@ -166,24 +164,26 @@ def main(args: list[str] | None = None) -> int:
         max_chunks=max_chunks,
         min_cluster_size=parsed_args.min_snake_size,
         phase2_stop_ratio=parsed_args.phase2_ratio,
-        clear_output_on_start=True,
-        save_intermediate_results=True,
     )
 
     try:
-        # Run pipeline
-        pipeline = TopologizationPipeline(config, llm, jinja_env)
-        result = pipeline.run()
+        # Run topologization
+        _ = topologize(
+            input_file=parsed_args.input_file,
+            workspace_path=parsed_args.workspace,
+            config=config,
+            llm=llm,
+            jinja_env=jinja_env,
+        )
 
         # Print summary
-        print("\n" + "=" * 60)
-        print("=== Pipeline Complete ===")
-        print("=" * 60)
-        print(f"Total chunks: {len(result.all_chunks)}")
-        print(f"Total snakes: {len(result.snakes)}")
-        print("\nOutput files:")
-        for name, path in result.output_files.items():
-            print(f"  - {name}: {path}")
+        print("\nWorkspace created successfully!")
+        print(f"Workspace path: {parsed_args.workspace}")
+        print("\nYou can now access the results programmatically:")
+        print("  from summary.topologization import Topologization")
+        print(f"  topo = Topologization(Path('{parsed_args.workspace}'))")
+        print("  for chunk in topo.knowledge_graph:")
+        print("      print(chunk.label, chunk.content)")
 
         return 0
 

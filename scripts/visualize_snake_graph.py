@@ -1,68 +1,79 @@
 """Script to generate snake-level visualization from summaries."""
 
-import json
 from pathlib import Path
 
-from dev.snake_detector import load_graph_from_json
+import networkx as nx
+
 from dev.visualize_snake_graph import visualize_snake_graph
-from summary.topologization.snake_graph_builder import SnakeGraphBuilder
+from summary.topologization import Topologization
 
 
 def main():
-    """Generate snake-level visualization from snake summaries."""
+    """Generate snake-level visualization from workspace."""
     # Setup paths
     project_root = Path(__file__).parent.parent
-    json_path = project_root / "output" / "knowledge_graph.json"
-    snakes_path = project_root / "output" / "snakes.json"
-    summaries_path = project_root / "output" / "snake_summaries.json"
+    workspace_path = project_root / "workspace"
     output_path = project_root / "output" / "snake_graph"
 
-    # Check if files exist
-    if not json_path.exists():
-        print(f"Error: Knowledge graph JSON not found at {json_path}")
-        print("Please run the main extraction process first.")
+    # Check if workspace exists
+    if not workspace_path.exists():
+        print(f"Error: Workspace not found at {workspace_path}")
+        print("Please run the main extraction process first (python main.py)")
         return
 
-    if not snakes_path.exists():
-        print(f"Error: Snakes JSON not found at {snakes_path}")
-        print("Please run the main extraction process with snake detection first.")
-        return
+    print(f"Loading workspace from: {workspace_path}")
 
-    if not summaries_path.exists():
-        print(f"Error: Snake summaries JSON not found at {summaries_path}")
-        print("Please run the main extraction process with summarization first.")
-        return
+    # Load Topologization object
+    topo = Topologization(workspace_path)
 
-    print(f"Reading knowledge graph from: {json_path}")
-    graph = load_graph_from_json(json_path)
-    print(f"Loaded graph with {len(graph.nodes())} nodes and {len(graph.edges())} edges")
+    # Build NetworkX graph from snake graph
+    snake_graph = nx.DiGraph()
 
-    print(f"\nReading snakes from: {snakes_path}")
-    with open(snakes_path, encoding="utf-8") as f:
-        snakes_data = json.load(f)
+    # Add nodes with attributes and collect summaries
+    snake_summaries = []
+    for snake in topo.snake_graph:
+        snake_graph.add_node(
+            snake.snake_id,
+            size=snake.size,
+            first_label=snake.first_label,
+            last_label=snake.last_label,
+            node_ids=snake.chunk_ids,  # Add chunk IDs to node attributes
+        )
 
-    # Extract snake node lists
-    snakes = [snake_data["nodes"] for snake_data in snakes_data]
-    # Each snake_data["nodes"] is a list of dicts with "id" key
-    # Convert to list of node IDs
-    snakes = [[node["id"] for node in snake_nodes] for snake_nodes in snakes]
-    print(f"Loaded {len(snakes)} snakes")
+        # Collect summary for visualization
+        summary_dict = {
+            "snake_id": snake.snake_id,
+            "first_label": snake.first_label,
+            "last_label": snake.last_label,
+            "summary": snake.summary,
+            "size": snake.size,
+        }
+        snake_summaries.append(summary_dict)
 
-    print(f"\nReading snake summaries from: {summaries_path}")
-    with open(summaries_path, encoding="utf-8") as f:
-        snake_summaries = json.load(f)
+    # Add edges with internal edge counts
+    for from_id, to_id, count in topo.snake_graph.get_edges():
+        snake_graph.add_edge(from_id, to_id, internal_edge_count=count)
+
+    print(f"Loaded snake graph with {len(snake_graph.nodes())} snakes and {len(snake_graph.edges())} inter-snake edges")
+
+    # Calculate importance for edges (normalize internal_edge_count)
+    if snake_graph.number_of_edges() > 0:
+        max_count = max(snake_graph.edges[edge]["internal_edge_count"] for edge in snake_graph.edges())
+        for edge in snake_graph.edges():
+            count = snake_graph.edges[edge]["internal_edge_count"]
+            # Normalize to [0, 1]
+            importance = count / max_count if max_count > 0 else 0.5
+            snake_graph.edges[edge]["importance"] = importance
+
     print(f"Loaded {len(snake_summaries)} summaries")
-
-    # Build snake-level graph
-    print("\nBuilding snake-level graph...")
-    builder = SnakeGraphBuilder()
-    snake_graph = builder.build_snake_graph(snakes, graph)
-
-    print(f"Snake graph: {len(snake_graph.nodes())} snakes, {len(snake_graph.edges())} inter-snake edges")
 
     # Generate visualization
     print("\nGenerating visualization...")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     visualize_snake_graph(snake_graph, output_path, snake_summaries)
+
+    # Close database connection
+    topo.close()
 
 
 if __name__ == "__main__":

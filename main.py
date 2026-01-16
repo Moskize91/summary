@@ -9,7 +9,7 @@ if __name__ == "__main__":
     data_dir = project_root / "summary" / "data"
     input_file = data_dir / "明朝那些事儿.txt"
     config_file = project_root / "format.json"
-    output_dir = project_root / "output"
+    workspace_dir = project_root / "workspace"
     cache_dir = project_root / "cache"
 
     # Build command-line arguments
@@ -17,8 +17,8 @@ if __name__ == "__main__":
         str(input_file),
         "--config",
         str(config_file),
-        "--output",
-        str(output_dir),
+        "--workspace",
+        str(workspace_dir),
         "--cache",
         str(cache_dir),
         "--max-chunks",

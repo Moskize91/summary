@@ -9,6 +9,7 @@ from jinja2 import Environment
 
 from ..llm import LLM
 from .cognitive_chunk import CognitiveChunk
+from .storage import SentenceId
 from .working_memory import WorkingMemory
 
 
@@ -38,14 +39,19 @@ class ChunkExtractor:
         self.jinja_env = jinja_env
 
     def extract_chunks(
-        self, text: str, working_memory: WorkingMemory, sentence_map: dict[int, str]
+        self,
+        text: str,
+        working_memory: WorkingMemory,
+        chunk_sentence_ids: list[SentenceId],
+        chunk_sentence_texts: list[str],
     ) -> ExtractionResult | None:
         """Extract cognitive chunks from text.
 
         Args:
             text: Text segment to process
             working_memory: Current working memory state
-            sentence_map: Mapping from sentence ID to sentence text
+            chunk_sentence_ids: List of sentence IDs for this text chunk
+            chunk_sentence_texts: List of sentence texts corresponding to sentence IDs
 
         Returns:
             ExtractionResult containing chunks, temp_ids, links, and order correctness
@@ -82,15 +88,43 @@ class ChunkExtractor:
             chunks = []
             temp_ids = []
 
+            # Build sentence text to ID mapping for efficient lookup
+            sentence_text_to_id = {text: sid for text, sid in zip(chunk_sentence_texts, chunk_sentence_ids)}
+
             for data in chunks_data:
-                # Find sentence_id from source_sentences
+                # Parse source_sentences to find matching sentence IDs
                 source_sentences = data.get("source_sentences", [])
-                sentence_id = self._find_sentence_id(source_sentences, sentence_map)
+                matched_sentence_ids = []
+                seen_ids = set()  # Track seen sentence IDs to avoid duplicates
+
+                for source_sent in source_sentences:
+                    # Try exact match first
+                    if source_sent in sentence_text_to_id:
+                        sid = sentence_text_to_id[source_sent]
+                        if sid not in seen_ids:
+                            matched_sentence_ids.append(sid)
+                            seen_ids.add(sid)
+                    else:
+                        # If no exact match, try fuzzy matching
+                        matched_id = self._fuzzy_match_sentence(
+                            source_sent, chunk_sentence_texts, sentence_text_to_id
+                        )
+                        if matched_id and matched_id not in seen_ids:
+                            matched_sentence_ids.append(matched_id)
+                            seen_ids.add(matched_id)
+
+                # If no sentences matched, use minimum sentence ID as fallback
+                if not matched_sentence_ids:
+                    matched_sentence_ids = [min(chunk_sentence_ids)] if chunk_sentence_ids else [(0, 0)]
+
+                # Use first matched sentence ID as primary sentence_id (for sorting)
+                primary_sentence_id = matched_sentence_ids[0]
 
                 chunk = CognitiveChunk(
                     id=0,  # Will be assigned by WorkingMemory
                     generation=0,  # Will be assigned by WorkingMemory
-                    sentence_id=sentence_id,
+                    sentence_id=primary_sentence_id,
+                    sentence_ids=matched_sentence_ids,  # Store all matched sentence IDs
                     label=data.get("label", ""),
                     content=data.get("content", ""),
                     links=[],  # Will be populated after ID assignment
@@ -171,32 +205,49 @@ class ChunkExtractor:
 
         return chunks_pos < links_pos
 
-    def _find_sentence_id(self, source_sentences: list[str], sentence_map: dict[int, str]) -> int:
-        """Find the minimum sentence ID from source sentences using substring matching.
+    def _fuzzy_match_sentence(
+        self,
+        source_sent: str,
+        candidate_texts: list[str],
+        text_to_id: dict[str, SentenceId],
+    ) -> SentenceId | None:
+        """Find best matching sentence using fuzzy matching.
 
         Args:
-            source_sentences: List of sentence strings from LLM output
-            sentence_map: Mapping from sentence ID to sentence text
+            source_sent: Source sentence to match
+            candidate_texts: List of candidate sentence texts
+            text_to_id: Mapping from sentence text to sentence ID
 
         Returns:
-            Minimum sentence ID found, or 0 if no match found
+            Matched sentence ID, or None if no good match found
         """
-        found_ids = []
+        # Normalize source sentence (strip whitespace, convert to lowercase)
+        normalized_source = source_sent.strip().lower()
 
-        for source_sent in source_sentences:
-            source_sent_stripped = source_sent.strip()
-            if not source_sent_stripped:
-                continue
+        # Try to find best match
+        best_match = None
+        best_score = 0.0
 
-            # Try to find this sentence in sentence_map
-            for sent_id, sent_text in sentence_map.items():
-                # Use substring matching (source_sent might be truncated by LLM)
-                if source_sent_stripped in sent_text or sent_text in source_sent_stripped:
-                    found_ids.append(sent_id)
-                    break
+        for candidate in candidate_texts:
+            normalized_candidate = candidate.strip().lower()
 
-        if not found_ids:
-            print(f"Warning: Could not find sentence IDs for source_sentences: {source_sentences[:2]}...")
-            return 0
+            # Simple similarity: ratio of common characters
+            # This is a simple approach; could use Levenshtein distance or other algorithms
+            if normalized_source == normalized_candidate:
+                return text_to_id[candidate]
 
-        return min(found_ids)
+            # Calculate overlap ratio
+            if len(normalized_source) > 0:
+                # Count how many characters from source appear in candidate
+                common_chars = sum(1 for c in normalized_source if c in normalized_candidate)
+                score = common_chars / len(normalized_source)
+
+                if score > best_score:
+                    best_score = score
+                    best_match = candidate
+
+        # Return best match if score is above threshold (80%)
+        if best_score > 0.8 and best_match:
+            return text_to_id[best_match]
+
+        return None

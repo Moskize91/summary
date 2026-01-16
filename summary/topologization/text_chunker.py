@@ -7,30 +7,41 @@ from pathlib import Path
 from spacy.lang.xx import MultiLanguage
 from spacy.language import Language
 
+from .storage import FragmentWriter, SentenceId
+
 
 @dataclass
 class ChunkWithSentences:
     """A text chunk with associated sentence IDs."""
 
     text: str
-    sentence_ids: list[int]
+    sentence_ids: list[SentenceId]
+    sentence_texts: list[str]  # Sentence texts corresponding to sentence_ids
 
 
 class TextChunker:
-    """Splits text into sentences and groups them into chunks."""
+    """Splits text into sentences and groups them into chunks.
 
-    def __init__(self, max_chunk_length: int = 2000, batch_size: int = 50000):
+    Integrates with FragmentWriter to store sentences in workspace fragments.
+    """
+
+    def __init__(
+        self,
+        fragment_writer: FragmentWriter,
+        max_chunk_length: int = 2000,
+        batch_size: int = 50000,
+    ):
         """Initialize the text chunker.
 
         Args:
+            fragment_writer: FragmentWriter for storing sentences
             max_chunk_length: Maximum character length for each chunk
             batch_size: Size of text batch to process with spacy at once
         """
+        self.fragment_writer = fragment_writer
         self.max_chunk_length = max_chunk_length
         self.batch_size = batch_size
         self._nlp = self._load_language_model()
-        self._sentence_map: dict[int, str] = {}  # sentence_id -> sentence_text
-        self._next_sentence_id: int = 1
 
     def _load_language_model(self) -> Language:
         """Load the spacy language model with sentencizer."""
@@ -74,6 +85,7 @@ class TextChunker:
         current_chunk = []
         current_chunk_length = 0
         current_sentence_ids = []
+        current_sentence_texts = []
 
         # Use spacy's pipe() for efficient batch processing
         for doc in self._nlp.pipe(self._generate_text_batches(file_path), batch_size=10):
@@ -86,42 +98,39 @@ class TextChunker:
 
                 # Yield chunk if adding sentence would exceed limit
                 if current_chunk and current_chunk_length + sentence_length > self.max_chunk_length:
+                    # End current fragment and yield chunk
+                    self.fragment_writer.end_fragment()
                     yield ChunkWithSentences(
                         text="".join(current_chunk),
                         sentence_ids=current_sentence_ids.copy(),
+                        sentence_texts=current_sentence_texts.copy(),
                     )
                     current_chunk = []
                     current_chunk_length = 0
                     current_sentence_ids = []
+                    current_sentence_texts = []
 
-                # Assign sentence ID and save to map
-                sentence_id = self._next_sentence_id
-                self._sentence_map[sentence_id] = sentence_text
-                self._next_sentence_id += 1
+                # Start new fragment if needed (first sentence of new chunk)
+                if not current_chunk:
+                    self.fragment_writer.start_fragment()
+
+                # Add sentence to fragment writer and get sentence ID
+                sentence_id = self.fragment_writer.add_sentence(sentence_text)
 
                 current_chunk.append(sentence_text)
                 current_chunk_length += sentence_length
                 current_sentence_ids.append(sentence_id)
+                current_sentence_texts.append(sentence_text)
 
         # Yield the last chunk if it exists
         if current_chunk:
+            self.fragment_writer.end_fragment()
             yield ChunkWithSentences(
                 text="".join(current_chunk),
                 sentence_ids=current_sentence_ids.copy(),
+                sentence_texts=current_sentence_texts.copy(),
             )
 
-    def get_sentence_map(self) -> dict[int, str]:
-        """Get the sentence ID to sentence text mapping.
-
-        Returns:
-            Dictionary mapping sentence IDs to sentence text
-        """
-        return self._sentence_map.copy()
-
-    def reset_sentence_tracking(self) -> None:
-        """Reset sentence ID tracking and clear sentence map.
-
-        Call this before processing a new file if you want fresh sentence IDs.
-        """
-        self._sentence_map.clear()
-        self._next_sentence_id = 1
+    def finalize(self):
+        """Finalize text chunking and flush remaining fragments."""
+        self.fragment_writer.finalize()

@@ -27,6 +27,7 @@
     "pyvis",
     "sentencizer",
     "topologization",
+    "topologize",
     "venv"
   ],
   "[python]": {
