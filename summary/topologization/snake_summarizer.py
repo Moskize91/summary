@@ -50,12 +50,9 @@ class SnakeSummarizer:
             user_message="请生成摘要。",
             temperature=0.4,
         )
+        return str(response).strip()
 
-        return response.strip()
-
-    def summarize_all_snakes(
-        self, snakes: list[list[int]], graph: nx.DiGraph
-    ) -> list[dict]:
+    def summarize_all_snakes(self, snakes: list[list[int]], graph: nx.DiGraph) -> list[dict]:
         """Generate summaries for all snakes.
 
         Args:
@@ -94,6 +91,9 @@ class SnakeSummarizer:
             print(f"  Summarizing Snake {snake_id} ({len(snake_nodes)} nodes)...")
             summary_text = self.summarize_snake(snake_nodes)
 
+            # Sort chunks by ID for preview
+            chunks_by_id = sorted(snake_nodes, key=lambda n: n["id"])
+
             # Build result
             summaries.append(
                 {
@@ -103,6 +103,15 @@ class SnakeSummarizer:
                     "last_label": snake_nodes[-1]["label"],
                     "node_ids": [n["id"] for n in snake_nodes],
                     "summary": summary_text,
+                    "chunks": [
+                        {
+                            "id": chunk["id"],
+                            "label": chunk["label"],
+                            "content": chunk["content"],
+                            "sentence_id": chunk["sentence_id"],
+                        }
+                        for chunk in chunks_by_id
+                    ],
                 }
             )
 

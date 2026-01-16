@@ -75,11 +75,7 @@ class WaveReflection:
             return locked_chunks
 
         # Phase 2: Reflection propagation
-        reflection_scores = self._reflection_propagation(
-            forward_scores=forward_scores,
-            knowledge_graph=knowledge_graph,
-            chunk_map=chunk_map,
-        )
+        reflection_scores = self._reflection_propagation(forward_scores=forward_scores, knowledge_graph=knowledge_graph)
 
         # Score only non-locked chunks
         candidate_scores = []
@@ -170,7 +166,6 @@ class WaveReflection:
         self,
         forward_scores: dict[int, float],
         knowledge_graph: nx.DiGraph,
-        chunk_map: dict[int, CognitiveChunk],
     ) -> dict[int, float]:
         """Phase 2: Reflection propagation in reverse direction (from earlier to later).
 

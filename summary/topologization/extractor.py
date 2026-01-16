@@ -5,8 +5,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..llm import LLM
 from .cognitive_chunk import CognitiveChunk
-from .llm import LLM
 from .working_memory import WorkingMemory
 
 

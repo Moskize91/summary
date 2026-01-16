@@ -6,8 +6,8 @@ from pathlib import Path
 
 import networkx as nx
 
+from ..llm import LLM
 from .extractor import ChunkExtractor
-from .llm import LLM
 from .snake_detector import SnakeDetector, split_connected_components
 from .snake_summarizer import SnakeSummarizer
 from .text_chunker import TextChunker
@@ -266,22 +266,26 @@ def main():
             from_node = knowledge_graph.nodes[all_snakes[snake_from][0]]
             to_node = knowledge_graph.nodes[all_snakes[snake_to][0]]
 
-            edges_data.append({
-                "from_snake": snake_from,
-                "to_snake": snake_to,
-                "from_label": from_node["label"],
-                "to_label": to_node["label"],
-                "importance": edge_data["importance"],
-                "internal_edge_count": edge_data["internal_edge_count"]
-            })
+            edges_data.append(
+                {
+                    "from_snake": snake_from,
+                    "to_snake": snake_to,
+                    "from_label": from_node["label"],
+                    "to_label": to_node["label"],
+                    "importance": edge_data["importance"],
+                    "internal_edge_count": edge_data["internal_edge_count"],
+                }
+            )
 
         with open(edges_output, "w", encoding="utf-8") as f:
             json.dump(edges_data, f, ensure_ascii=False, indent=2)
 
         print(f"\nSnake edges saved to: {edges_output}")
-        print(f"Sample edges:")
+        print("Sample edges:")
         for edge_info in edges_data[:5]:
-            print(f"  Snake {edge_info['from_snake']} ({edge_info['from_label']}) -> Snake {edge_info['to_snake']} ({edge_info['to_label']})")
+            print(
+                f"  Snake {edge_info['from_snake']} ({edge_info['from_label']}) -> Snake {edge_info['to_snake']} ({edge_info['to_label']})"
+            )
     else:
         print("\nNo snakes detected")
 

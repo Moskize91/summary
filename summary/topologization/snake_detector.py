@@ -201,9 +201,7 @@ class SnakeDetector:
 
         print(f"  ✓ Validated: All {len(fingerprints)} nodes have identical structure ({len(reference_edges)} edges)")
 
-    def _compute_distance(
-        self, cluster1: list[int], cluster2: list[int], graph: nx.DiGraph, fingerprints: dict[int, dict]
-    ) -> float:
+    def _compute_distance(self, cluster1: list[int], cluster2: list[int], fingerprints: dict[int, dict]) -> float:
         """Compute distance as the diameter of merged cluster.
 
         Distance = maximum pairwise distance within the merged cluster.
@@ -283,7 +281,7 @@ class SnakeDetector:
                 if not self._clusters_connected(graph, clusters[cluster_u], clusters[cluster_v]):
                     continue
 
-                dist = self._compute_distance(clusters[cluster_u], clusters[cluster_v], graph, fingerprints)
+                dist = self._compute_distance(clusters[cluster_u], clusters[cluster_v], fingerprints)
                 value = -dist  # Negative distance for max heap
 
                 heapq.heappush(edge_heap, (-value, (cluster_u, cluster_v)))
@@ -335,7 +333,7 @@ class SnakeDetector:
                     continue
 
                 # Compute new distance
-                new_dist = self._compute_distance(clusters[cluster_u], clusters[neighbor_cluster], graph, fingerprints)
+                new_dist = self._compute_distance(clusters[cluster_u], clusters[neighbor_cluster], fingerprints)
                 new_value = -new_dist
 
                 # Add to heap

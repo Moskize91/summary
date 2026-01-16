@@ -114,8 +114,8 @@ def visualize_snake_graph(
 
         # Add edge
         dot.edge(
-            str(snake_to),
             str(snake_from),
+            str(snake_to),
             color=edge_color,
             penwidth=str(edge_width),
         )
@@ -183,6 +183,7 @@ def _generate_html_wrapper(
             "last_label": node_data["last_label"],
             "node_ids": node_data["node_ids"],
             "summary": summary_data["summary"],
+            "chunks": summary_data.get("chunks", []),
         }
 
     # Build legend
@@ -310,7 +311,9 @@ def _generate_html_wrapper(
             border-radius: 6px;
             font-size: 14px;
             line-height: 1.6;
-            max-width: 500px;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow-y: auto;
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.2s;
@@ -399,10 +402,25 @@ def _generate_html_wrapper(
             node.addEventListener('mouseenter', (e) => {{
                 const nodeIdsStr = data.node_ids.join(', ');
 
+                // Build chunks HTML
+                let chunksHTML = '';
+                if (data.chunks && data.chunks.length > 0) {{
+                    chunksHTML = '<div class="tooltip-chunks">';
+                    chunksHTML += '<div style="font-weight: bold; margin-top: 8px; margin-bottom: 4px;">Chunks:</div>';
+                    data.chunks.forEach((chunk, idx) => {{
+                        chunksHTML += `<div style="margin-bottom: 6px; padding-left: 8px; border-left: 2px solid #666;">`;
+                        chunksHTML += `<div style="color: #FFF700; font-size: 13px;">${{idx + 1}}. [${{chunk.label}}] (ID: ${{chunk.id}})</div>`;
+                        chunksHTML += `<div style="color: #ccc; font-size: 12px; margin-top: 2px;">${{chunk.content}}</div>`;
+                        chunksHTML += `</div>`;
+                    }});
+                    chunksHTML += '</div>';
+                }}
+
                 const tooltipHTML = `
                     <div class="tooltip-header">Snake ${{data.snake_id}}: ${{data.first_label}} → ${{data.last_label}}</div>
                     <div class="tooltip-meta">Size: ${{data.size}} nodes | Node IDs: ${{nodeIdsStr}}</div>
                     <div class="tooltip-summary">${{data.summary}}</div>
+                    ${{chunksHTML}}
                 `;
                 tooltip.innerHTML = tooltipHTML;
                 tooltip.classList.add('show');
