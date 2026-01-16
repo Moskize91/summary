@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import networkx as nx
+from jinja2 import Environment
 
 from summary.llm import LLM
 
@@ -14,15 +15,17 @@ class SnakeSummarizer:
     narrative summary that captures the main theme and progression.
     """
 
-    def __init__(self, llm: LLM, prompt_template_path: Path):
+    def __init__(self, llm: LLM, prompt_template_path: Path, jinja_env: Environment):
         """Initialize summarizer with LLM client and prompt template.
 
         Args:
             llm: LLM client for generating summaries
             prompt_template_path: Path to Jinja template for summarization prompt
+            jinja_env: Jinja2 Environment for loading templates
         """
         self.llm = llm
         self.prompt_template_path = prompt_template_path
+        self.jinja_env = jinja_env
 
     def summarize_snake(self, snake_nodes: list[dict]) -> str:
         """Generate a narrative summary for a snake.
@@ -41,6 +44,7 @@ class SnakeSummarizer:
         # Load and render prompt template
         system_prompt = self.llm.load_system_prompt(
             self.prompt_template_path,
+            self.jinja_env,
             snake_nodes=snake_nodes,
         )
 

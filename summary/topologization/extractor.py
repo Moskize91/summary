@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from jinja2 import Environment
+
 from ..llm import LLM
 from .cognitive_chunk import CognitiveChunk
 from .working_memory import WorkingMemory
@@ -23,15 +25,17 @@ class ExtractionResult:
 class ChunkExtractor:
     """Extracts cognitive chunks from text using LLM."""
 
-    def __init__(self, llm: LLM, prompt_template_path: Path):
+    def __init__(self, llm: LLM, prompt_template_path: Path, jinja_env: Environment):
         """Initialize the extractor.
 
         Args:
             llm: LLM client instance
             prompt_template_path: Path to the extraction prompt template
+            jinja_env: Jinja2 Environment for loading templates
         """
         self.llm = llm
         self.prompt_template_path = prompt_template_path
+        self.jinja_env = jinja_env
 
     def extract_chunks(
         self, text: str, working_memory: WorkingMemory, sentence_map: dict[int, str]
@@ -50,6 +54,7 @@ class ChunkExtractor:
         # Build prompt
         system_prompt = self.llm.load_system_prompt(
             self.prompt_template_path,
+            self.jinja_env,
             working_memory=working_memory.format_for_prompt(),
             new_text=text,
         )

@@ -4,6 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from .llm import LLM
+from .template import create_env
 from .topologization.core import PipelineConfig, TopologizationPipeline
 
 
@@ -122,6 +124,9 @@ def main(args: list[str] | None = None) -> int:
     if log_dir is None:
         log_dir = parsed_args.output / "logs"
 
+    # Setup cache directory
+    cache_dir = parsed_args.cache
+
     # Handle max_chunks = 0 (unlimited)
     max_chunks = parsed_args.max_chunks if parsed_args.max_chunks > 0 else None
 
@@ -139,13 +144,20 @@ def main(args: list[str] | None = None) -> int:
         print(f"Error: Snake summary prompt file not found: {snake_summary_prompt_file}", file=sys.stderr)
         return 1
 
+    # Create LLM instance
+    llm = LLM(
+        config_path=parsed_args.config,
+        log_dir_path=log_dir,
+        cache_dir_path=cache_dir,
+    )
+
+    # Create Jinja2 environment
+    jinja_env = create_env(data_dir)
+
     # Create pipeline configuration
     config = PipelineConfig(
         input_file=parsed_args.input_file,
         output_dir=parsed_args.output,
-        config_file=parsed_args.config,
-        log_dir=log_dir,
-        cache_dir=parsed_args.cache,
         extraction_prompt_file=extraction_prompt_file,
         snake_summary_prompt_file=snake_summary_prompt_file,
         max_chunk_length=parsed_args.chunk_length,
@@ -160,7 +172,7 @@ def main(args: list[str] | None = None) -> int:
 
     try:
         # Run pipeline
-        pipeline = TopologizationPipeline(config)
+        pipeline = TopologizationPipeline(config, llm, jinja_env)
         result = pipeline.run()
 
         # Print summary

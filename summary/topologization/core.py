@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import networkx as nx
+from jinja2 import Environment
 
 from ..llm import LLM
 from .cognitive_chunk import CognitiveChunk
@@ -26,13 +27,10 @@ class PipelineConfig:
     # Input/Output
     input_file: Path
     output_dir: Path
-    config_file: Path
-    log_dir: Path | None = None
-    cache_dir: Path | None = None
 
     # Prompt templates
-    extraction_prompt_file: Path | None = None
-    snake_summary_prompt_file: Path | None = None
+    extraction_prompt_file: Path
+    snake_summary_prompt_file: Path
 
     # Processing parameters
     max_chunk_length: int = 800
@@ -80,13 +78,17 @@ class TopologizationPipeline:
     7. Snake graph construction
     """
 
-    def __init__(self, config: PipelineConfig):
+    def __init__(self, config: PipelineConfig, llm: LLM, jinja_env: Environment):
         """Initialize pipeline with configuration.
 
         Args:
             config: Pipeline configuration
+            llm: LLM instance for extraction and summarization
+            jinja_env: Jinja2 Environment for loading prompt templates
         """
         self.config = config
+        self.llm = llm
+        self.jinja_env = jinja_env
 
         # Setup directories
         self._setup_directories()
@@ -97,29 +99,14 @@ class TopologizationPipeline:
             batch_size=config.batch_size,
         )
 
-        self.llm = LLM(
-            config_path=config.config_file,
-            log_dir_path=config.log_dir,
-            cache_dir_path=config.cache_dir,
-        )
-
-        # Set default prompt paths if not provided
-        extraction_prompt = config.extraction_prompt_file
-        if extraction_prompt is None:
-            extraction_prompt = Path(__file__).parent.parent / "data" / "extraction_prompt.jinja"
-
-        snake_summary_prompt = config.snake_summary_prompt_file
-        if snake_summary_prompt is None:
-            snake_summary_prompt = Path(__file__).parent.parent / "data" / "snake_summary_prompt.jinja"
-
-        self.extractor = ChunkExtractor(self.llm, extraction_prompt)
+        self.extractor = ChunkExtractor(self.llm, config.extraction_prompt_file, self.jinja_env)
         self.working_memory = WorkingMemory(capacity=config.working_memory_capacity)
         self.wave_reflection = WaveReflection(generation_decay_factor=config.generation_decay_factor)
         self.snake_detector = SnakeDetector(
             min_cluster_size=config.min_cluster_size,
             phase2_stop_ratio=config.phase2_stop_ratio,
         )
-        self.snake_summarizer = SnakeSummarizer(self.llm, snake_summary_prompt)
+        self.snake_summarizer = SnakeSummarizer(self.llm, config.snake_summary_prompt_file, self.jinja_env)
 
     def _setup_directories(self) -> None:
         """Setup output directories."""
@@ -127,12 +114,6 @@ class TopologizationPipeline:
             shutil.rmtree(self.config.output_dir)
 
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
-
-        if self.config.log_dir:
-            self.config.log_dir.mkdir(parents=True, exist_ok=True)
-
-        if self.config.cache_dir:
-            self.config.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def run(self) -> PipelineResult:
         """Run the complete pipeline.
@@ -143,11 +124,7 @@ class TopologizationPipeline:
         print("=== Cognitive Chunk Extraction ===")
         print(f"Working memory capacity: {self.config.working_memory_capacity}")
         print(f"Input file: {self.config.input_file.name}")
-        print(f"Output directory: {self.config.output_dir}")
-        if self.config.log_dir:
-            print(f"  - Logs: {self.config.log_dir}")
-        if self.config.cache_dir:
-            print(f"Cache directory: {self.config.cache_dir} (persistent)\n")
+        print(f"Output directory: {self.config.output_dir}\n")
 
         # Step 1: Extract knowledge graph
         print("\n=== Phase 1: Knowledge Graph Extraction ===")
@@ -438,6 +415,7 @@ class KnowledgeGraphExtractor:
         self,
         llm: LLM,
         extraction_prompt_file: Path,
+        jinja_env: Environment,
         max_chunk_length: int = 800,
         batch_size: int = 50000,
         working_memory_capacity: int = 7,
@@ -448,13 +426,14 @@ class KnowledgeGraphExtractor:
         Args:
             llm: LLM instance for extraction
             extraction_prompt_file: Path to extraction prompt template
+            jinja_env: Jinja2 Environment for loading templates
             max_chunk_length: Maximum character length per chunk
             batch_size: Text batch size for spacy processing
             working_memory_capacity: Working memory capacity
             generation_decay_factor: Decay factor for Wave Reflection
         """
         self.chunker = TextChunker(max_chunk_length=max_chunk_length, batch_size=batch_size)
-        self.extractor = ChunkExtractor(llm, extraction_prompt_file)
+        self.extractor = ChunkExtractor(llm, extraction_prompt_file, jinja_env)
         self.working_memory = WorkingMemory(capacity=working_memory_capacity)
         self.wave_reflection = WaveReflection(generation_decay_factor=generation_decay_factor)
 
@@ -543,6 +522,7 @@ class ThematicChainAnalyzer:
         knowledge_graph: nx.DiGraph,
         llm: LLM,
         snake_summary_prompt_file: Path,
+        jinja_env: Environment,
     ) -> tuple[list[list[int]], list[dict], nx.DiGraph]:
         """Detect snakes and generate summaries.
 
@@ -550,6 +530,7 @@ class ThematicChainAnalyzer:
             knowledge_graph: Knowledge graph with chunks and edges
             llm: LLM instance for summarization
             snake_summary_prompt_file: Path to snake summary prompt template
+            jinja_env: Jinja2 Environment for loading templates
 
         Returns:
             Tuple of (snakes, snake_summaries, snake_graph)
@@ -565,7 +546,7 @@ class ThematicChainAnalyzer:
             return [], [], nx.DiGraph()
 
         # Summarize snakes
-        summarizer = SnakeSummarizer(llm, snake_summary_prompt_file)
+        summarizer = SnakeSummarizer(llm, snake_summary_prompt_file, jinja_env)
         snake_summaries = summarizer.summarize_all_snakes(all_snakes, knowledge_graph)
 
         # Build snake graph

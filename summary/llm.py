@@ -9,9 +9,8 @@ from logging import DEBUG, FileHandler, Formatter, Logger, getLogger
 from pathlib import Path
 from time import sleep
 
+from jinja2 import Environment
 from openai import OpenAI
-
-from .template import create_env
 
 # Global state for logger filename generation
 _LOGGER_LOCK = threading.Lock()
@@ -248,16 +247,16 @@ class LLM:
 
         return response
 
-    def load_system_prompt(self, prompt_template_path: Path, **kwargs) -> str:
+    def load_system_prompt(self, prompt_template_path: Path, jinja_env: Environment, **kwargs) -> str:
         """Load and render the system prompt from a Jinja template.
 
         Args:
             prompt_template_path: Path to the prompt.jinja file
+            jinja_env: Jinja2 Environment for loading templates
             **kwargs: Variables to pass to the template
 
         Returns:
             Rendered system prompt
         """
-        env = create_env(prompt_template_path.parent)
-        template = env.get_template(prompt_template_path.name)
+        template = jinja_env.get_template(prompt_template_path.name)
         return template.render(**kwargs)
