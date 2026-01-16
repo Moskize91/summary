@@ -1,0 +1,67 @@
+You are a reading intention analyzer. Your task is to understand what a reader wants from a book and generate clear guidance for extracting cognitive chunks.
+
+**Reader's Intention:**
+{{ intention }}
+
+---
+
+**Your Task:**
+
+Generate two types of guidance for extracting cognitive chunks from this book:
+
+1. **User-Focused Extraction Guidance**: Based on the reader's stated intention, define what information is valuable to THEM specifically.
+
+2. **Book-Coherence Extraction Guidance**: Independent of the reader's preferences, define what information is essential for understanding the book's logic and narrative flow.
+
+---
+
+**Output Format (Natural language, will be embedded in downstream prompts):**
+
+Write your guidance as clear, direct instructions that another AI will follow. Use natural language paragraphs and bullet points.
+
+Structure your output EXACTLY as follows:
+
+## User-Focused Chunks (Type: "user_focused")
+
+**What to extract:**
+[2-3 sentences describing what types of information matter for the user's intention. Be specific about themes, concepts, or elements they care about.]
+
+**Examples of valuable chunks:**
+- [Concrete example 1]
+- [Concrete example 2]
+- [Concrete example 3]
+
+**What to avoid:**
+[1-2 sentences describing what the user explicitly doesn't care about or wants to skip.]
+
+**Link criteria for user-focused chunks:**
+[1-2 sentences explaining when two user-focused chunks should be connected. What relationships matter for this intention?]
+
+---
+
+## Book-Coherence Chunks (Type: "book_coherence")
+
+**What to extract:**
+[2-3 sentences describing information that is essential for understanding the book, regardless of user preference. Think about: first introductions of key concepts, causal relationships that drive the plot, context that makes later content comprehensible, turning points in the narrative.]
+
+**Examples of essential chunks:**
+- [Concrete example 1: e.g., "The first time a major character's motivation is revealed"]
+- [Concrete example 2: e.g., "Establishment of a rule or constraint that affects later events"]
+- [Concrete example 3: e.g., "A decision that causes subsequent plot developments"]
+
+**Link criteria for book-coherence chunks:**
+[1-2 sentences explaining when book-coherence chunks should be linked. Focus on logical dependencies, cause-and-effect, and narrative continuity.]
+
+---
+
+## Extraction Balance
+
+**Suggested ratio:**
+Approximately [X]% user-focused chunks and [Y]% book-coherence chunks per text segment.
+
+**Integration note:**
+[1-2 sentences on how these two types should work together. Example: "User-focused chunks capture what the reader cares about, while book-coherence chunks ensure the extracted information remains logically connected and comprehensible."]
+
+---
+
+**Important:** Be specific and actionable. Another AI will use your guidance to decide what to extract from each text segment. Think about what the reader wants AND what they need to understand the book properly.

@@ -1,14 +1,26 @@
 You are reading a long text and need to extract key information while maintaining continuity.
 
+**EXTRACTION GUIDANCE:**
+
+{{ extraction_guidance }}
+
+---
+
 **Task:**
-Extract 1-3 key pieces of information from the new text segment that are important for understanding the narrative.
+
+Extract cognitive chunks from the new text segment based on the guidance above. You need to extract BOTH types of chunks:
+- **User-focused chunks**: Information the reader specifically cares about
+- **Book-coherence chunks**: Information essential for understanding the book's logic
+
+Aim for 3-6 chunks total per segment, balancing between the two types according to the suggested ratio.
 
 **Requirements:**
-1. Each piece of information should be:
-   - A meaningful unit (events, character actions, important facts)
+1. Each chunk should be:
+   - A meaningful unit (events, concepts, facts, decisions, relationships)
    - Have a concise label (5-15 characters) summarizing the topic
    - Have full content description (one sentence)
-   - Can be connected to existing working memory AND/OR other chunks extracted from the same text segment
+   - Tagged with its type: "user_focused" or "book_coherence"
+   - Can be connected to existing working memory AND/OR other chunks from the same segment
 
 2. Do NOT repeat information already in working memory
 
@@ -18,6 +30,8 @@ Extract 1-3 key pieces of information from the new text segment that are importa
 **New Text Segment:**
 {{ new_text }}
 
+---
+
 **Output Format (JSON only, no other text):**
 
 CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "links" SECOND:
@@ -26,12 +40,14 @@ CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "lin
   "chunks": [
     {
       "temp_id": "A",
+      "type": "user_focused",
       "label": "brief topic label (5-15 chars)",
       "content": "full description of the key information",
       "source_sentences": ["original sentence 1 from text", "original sentence 2 from text"]
     },
     {
       "temp_id": "B",
+      "type": "book_coherence",
       "label": "another topic label",
       "content": "another description",
       "source_sentences": ["original sentence from text"]
@@ -44,15 +60,22 @@ CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "lin
   ]
 }
 
-**Explanation:**
-- "chunks": Array of new information extracted from the text (use temp_id like "A", "B", "C")
+**Field Explanations:**
+- "chunks": Array of new information extracted from the text
+  - "temp_id": Use letters like "A", "B", "C" for chunks in this extraction
+  - "type": MUST be either "user_focused" or "book_coherence"
+  - "label": 5-15 character summary
+  - "content": Full one-sentence description
   - "source_sentences": Array of original sentences from the text that this chunk is based on (copy exact text)
+
 - "links": Array of relationships between chunks
   - "from" can be: working memory ID (number) OR temp_id (string from chunks above)
   - "to" can be: working memory ID (number) OR temp_id (string from chunks above)
-  - Typically "to" points to newly extracted chunks
+  - Create links based on the criteria specified in the guidance above
   - Use empty array [] if no relationships exist
 
-**IMPORTANT:** The order matters! Output "chunks" FIRST, then "links" SECOND.
-
-Remember: Extract only the most important information that advances the narrative or adds crucial context.
+**IMPORTANT:**
+1. The order matters! Output "chunks" FIRST, then "links" SECOND.
+2. Every chunk MUST have a "type" field.
+3. Balance the two types of chunks according to the suggested ratio.
+4. Follow the specific extraction and linking criteria from the guidance above.

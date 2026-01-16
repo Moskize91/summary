@@ -132,8 +132,8 @@ def main(args: list[str] | None = None) -> int:
 
     # Setup prompt file paths
     data_dir = Path(__file__).parent / "data"
-    extraction_prompt_file = data_dir / "extraction_prompt.jinja"
-    snake_summary_prompt_file = data_dir / "snake_summary_prompt.jinja"
+    extraction_prompt_file = data_dir / "topologization" / "chunk_extraction.jinja"
+    snake_summary_prompt_file = data_dir / "topologization" / "snake_summary.jinja"
 
     # Validate prompt files
     if not extraction_prompt_file.exists():

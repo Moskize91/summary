@@ -43,6 +43,7 @@ class TopologizationConfig:
 
 
 def topologize(
+    intention: str,
     input_file: Path,
     workspace_path: Path,
     config: TopologizationConfig,
