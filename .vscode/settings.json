@@ -26,6 +26,7 @@
     "pytest",
     "pyvis",
     "sentencizer",
+    "topologization",
     "venv"
   ],
   "[python]": {
