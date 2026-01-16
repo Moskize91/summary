@@ -2,9 +2,10 @@ from collections.abc import Iterator
 from typing import Generic, TypeVar
 
 NODE = TypeVar("NODE")
+EDGE = TypeVar("EDGE")
 
 
-class Graph(Generic[NODE]):
+class Graph(Generic[NODE, EDGE]):
     """Graph protocol for knowledge graph and snake graph.
 
     Provides iteration over nodes and access to edges.
@@ -19,12 +20,10 @@ class Graph(Generic[NODE]):
         """
         ...  # pylint: disable=unnecessary-ellipsis
 
-    def get_edges(self) -> list[tuple[int, ...]]:
+    def get_edges(self) -> list[EDGE]:
         """Get all edges in the graph.
 
         Returns:
-            List of edge tuples. Format depends on implementation:
-            - KnowledgeGraph: [(from_id, to_id), ...]
-            - SnakeGraph: [(from_id, to_id, count), ...]
+            List of Edge objects
         """
         ...  # pylint: disable=unnecessary-ellipsis

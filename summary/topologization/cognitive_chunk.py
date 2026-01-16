@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from .storage import SentenceId
+from .fragment import SentenceId
 
 
 @dataclass

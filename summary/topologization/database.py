@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-from .storage import SentenceId
+from .fragment import SentenceId
 
 
 def create_schema(conn: sqlite3.Connection):

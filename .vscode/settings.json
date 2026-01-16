@@ -20,6 +20,7 @@
   },
   "cSpell.words": [
     "Chunker",
+    "Fragmenter",
     "pylint",
     "pyproject",
     "pyright",

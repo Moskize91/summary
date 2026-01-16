@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..llm import LLM
 from .cognitive_chunk import ChunkBatch, CognitiveChunk
-from .storage import SentenceId
+from .fragment import SentenceId
 from .working_memory import WorkingMemory
 
 

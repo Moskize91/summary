@@ -40,8 +40,8 @@ def main():
         )
 
     # Add edges
-    for from_id, to_id in topo.knowledge_graph.get_edges():
-        graph.add_edge(from_id, to_id)
+    for edge in topo.knowledge_graph.get_edges():
+        graph.add_edge(edge.from_chunk.id, edge.to_chunk.id)
 
     print(f"Loaded graph with {len(graph.nodes())} nodes and {len(graph.edges())} edges")
 

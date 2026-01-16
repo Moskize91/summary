@@ -1,10 +1,19 @@
 """Fragment storage management for topologization workspace."""
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 # Type alias for sentence ID: (fragment_id, sentence_index)
 SentenceId = tuple[int, int]
+
+
+@dataclass
+class Sentence:
+    """Sentence with text and token count."""
+
+    text: str
+    token_count: int
 
 
 class FragmentWriter:
@@ -23,7 +32,7 @@ class FragmentWriter:
         self.workspace_path = workspace_path
         self.fragments_dir = workspace_path / "fragments"
         self.next_fragment_id = 1  # Start from 1
-        self.current_sentences: list[str] = []
+        self.current_sentences: list[Sentence] = []
         self.is_fragment_open = False
 
         # Ensure fragments directory exists
@@ -36,11 +45,12 @@ class FragmentWriter:
         self.current_sentences = []
         self.is_fragment_open = True
 
-    def add_sentence(self, text: str) -> SentenceId:
+    def add_sentence(self, text: str, token_count: int) -> SentenceId:
         """Add sentence to current fragment and return its ID.
 
         Args:
             text: Sentence text to store
+            token_count: Token count for this sentence
 
         Returns:
             Sentence ID as (fragment_id, sentence_index) tuple
@@ -52,7 +62,7 @@ class FragmentWriter:
             raise RuntimeError("Cannot add sentence: no fragment is open. Call start_fragment() first")
 
         sentence_index = len(self.current_sentences)
-        self.current_sentences.append(text)
+        self.current_sentences.append(Sentence(text=text, token_count=token_count))
 
         # Use next_fragment_id as the current fragment ID
         # (will be written when end_fragment is called)
@@ -70,8 +80,9 @@ class FragmentWriter:
 
         # Write fragment_N.json directly in fragments directory
         fragment_path = self.fragments_dir / f"fragment_{self.next_fragment_id}.json"
+        sentence_dicts = [{"text": s.text, "token_count": s.token_count} for s in self.current_sentences]
         with open(fragment_path, "w", encoding="utf-8") as f:
-            json.dump(self.current_sentences, f, ensure_ascii=False, indent=2)
+            json.dump(sentence_dicts, f, ensure_ascii=False, indent=2)
 
         # Move to next fragment
         self.next_fragment_id += 1
@@ -118,4 +129,4 @@ class FragmentReader:
         with open(fragment_path, encoding="utf-8") as f:
             sentences = json.load(f)
 
-        return sentences[sentence_index]
+        return sentences[sentence_index]["text"]

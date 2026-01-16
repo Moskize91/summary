@@ -4,6 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from tiktoken import get_encoding
+
 from .llm import LLM
 from .topologization import TopologizationConfig, topologize
 
@@ -67,10 +69,10 @@ def main(args: list[str] | None = None) -> int:
     )
 
     parser.add_argument(
-        "--chunk-length",
+        "--fragment-tokens",
         type=int,
         default=800,
-        help="Maximum character length per text chunk",
+        help="Maximum token count per text fragment",
     )
 
     parser.add_argument(
@@ -140,7 +142,7 @@ def main(args: list[str] | None = None) -> int:
 
     # Create pipeline configuration
     config = TopologizationConfig(
-        max_chunk_length=parsed_args.chunk_length,
+        max_fragment_tokens=parsed_args.fragment_tokens,
         working_memory_capacity=parsed_args.memory_capacity,
         generation_decay_factor=parsed_args.decay_factor,
         max_chunks=max_chunks,
@@ -156,6 +158,7 @@ def main(args: list[str] | None = None) -> int:
             workspace_path=parsed_args.workspace,
             config=config,
             llm=llm,
+            encoding=get_encoding("o200k_base"),
         )
         # Print summary
         print("\nWorkspace created successfully!")

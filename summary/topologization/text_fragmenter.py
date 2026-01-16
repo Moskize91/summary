@@ -1,4 +1,4 @@
-"""Text chunking utilities for splitting large texts into manageable chunks."""
+"""Text fragmentation utilities for splitting large texts into manageable fragments."""
 
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -6,21 +6,22 @@ from pathlib import Path
 
 from spacy.lang.xx import MultiLanguage
 from spacy.language import Language
+from tiktoken import Encoding
 
-from .storage import FragmentWriter, SentenceId
+from .fragment import FragmentWriter, SentenceId
 
 
 @dataclass
-class ChunkWithSentences:
-    """A text chunk with associated sentence IDs."""
+class FragmentWithSentences:
+    """A text fragment with associated sentence IDs."""
 
     text: str
     sentence_ids: list[SentenceId]
     sentence_texts: list[str]  # Sentence texts corresponding to sentence_ids
 
 
-class TextChunker:
-    """Splits text into sentences and groups them into chunks.
+class TextFragmenter:
+    """Splits text into sentences and groups them into fragments.
 
     Integrates with FragmentWriter to store sentences in workspace fragments.
     """
@@ -28,18 +29,21 @@ class TextChunker:
     def __init__(
         self,
         fragment_writer: FragmentWriter,
-        max_chunk_length: int = 2000,
+        encoding: Encoding,
+        max_fragment_tokens: int = 800,
         batch_size: int = 50000,
     ):
-        """Initialize the text chunker.
+        """Initialize the text fragmenter.
 
         Args:
             fragment_writer: FragmentWriter for storing sentences
-            max_chunk_length: Maximum character length for each chunk
+            encoding: Tiktoken encoding for token counting
+            max_fragment_tokens: Maximum token count for each fragment
             batch_size: Size of text batch to process with spacy at once
         """
         self.fragment_writer = fragment_writer
-        self.max_chunk_length = max_chunk_length
+        self.encoding = encoding
+        self.max_fragment_tokens = max_fragment_tokens
         self.batch_size = batch_size
         self._nlp = self._load_language_model()
 
@@ -73,17 +77,17 @@ class TextChunker:
         if text_buffer:
             yield text_buffer
 
-    def stream_chunks_from_file(self, file_path: Path) -> Generator[ChunkWithSentences, None, None]:
-        """Stream text chunks from a file using spacy's pipe() for efficient processing.
+    def stream_fragments_from_file(self, file_path: Path) -> Generator[FragmentWithSentences, None, None]:
+        """Stream text fragments from a file using spacy's pipe() for efficient processing.
 
         Args:
             file_path: Path to the text file
 
         Yields:
-            ChunkWithSentences objects with text and sentence IDs
+            FragmentWithSentences objects with text and sentence IDs
         """
-        current_chunk = []
-        current_chunk_length = 0
+        current_fragment = []
+        current_fragment_tokens = 0
         current_sentence_ids = []
         current_sentence_texts = []
 
@@ -94,43 +98,44 @@ class TextChunker:
                 if not sentence_text:
                     continue
 
-                sentence_length = len(sentence_text)
+                # Calculate token count for this sentence
+                sentence_token_count = len(self.encoding.encode(sentence_text))
 
-                # Yield chunk if adding sentence would exceed limit
-                if current_chunk and current_chunk_length + sentence_length > self.max_chunk_length:
-                    # End current fragment and yield chunk
+                # Yield fragment if adding sentence would exceed limit
+                if current_fragment and current_fragment_tokens + sentence_token_count > self.max_fragment_tokens:
+                    # End current fragment and yield
                     self.fragment_writer.end_fragment()
-                    yield ChunkWithSentences(
-                        text="".join(current_chunk),
+                    yield FragmentWithSentences(
+                        text="".join(current_fragment),
                         sentence_ids=current_sentence_ids.copy(),
                         sentence_texts=current_sentence_texts.copy(),
                     )
-                    current_chunk = []
-                    current_chunk_length = 0
+                    current_fragment = []
+                    current_fragment_tokens = 0
                     current_sentence_ids = []
                     current_sentence_texts = []
 
-                # Start new fragment if needed (first sentence of new chunk)
-                if not current_chunk:
+                # Start new fragment if needed (first sentence of new fragment)
+                if not current_fragment:
                     self.fragment_writer.start_fragment()
 
-                # Add sentence to fragment writer and get sentence ID
-                sentence_id = self.fragment_writer.add_sentence(sentence_text)
+                # Add sentence to fragment writer with token count and get sentence ID
+                sentence_id = self.fragment_writer.add_sentence(sentence_text, sentence_token_count)
 
-                current_chunk.append(sentence_text)
-                current_chunk_length += sentence_length
+                current_fragment.append(sentence_text)
+                current_fragment_tokens += sentence_token_count
                 current_sentence_ids.append(sentence_id)
                 current_sentence_texts.append(sentence_text)
 
-        # Yield the last chunk if it exists
-        if current_chunk:
+        # Yield the last fragment if it exists
+        if current_fragment:
             self.fragment_writer.end_fragment()
-            yield ChunkWithSentences(
-                text="".join(current_chunk),
+            yield FragmentWithSentences(
+                text="".join(current_fragment),
                 sentence_ids=current_sentence_ids.copy(),
                 sentence_texts=current_sentence_texts.copy(),
             )
 
     def finalize(self):
-        """Finalize text chunking and flush remaining fragments."""
+        """Finalize text fragmentation and flush remaining fragments."""
         self.fragment_writer.finalize()

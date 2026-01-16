@@ -4,16 +4,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import networkx as nx
+from tiktoken import Encoding
 
 from ..llm import LLM
 from . import database
 from .api import Topologization
 from .chunk_extraction import ChunkExtractor
 from .cognitive_chunk import CognitiveChunk
+from .fragment import FragmentWriter
 from .snake_detector import SnakeDetector, split_connected_components
 from .snake_graph_builder import SnakeGraphBuilder
-from .storage import FragmentWriter
-from .text_chunker import TextChunker
+from .text_fragmenter import TextFragmenter
 from .wave_reflection import WaveReflection
 from .working_memory import WorkingMemory
 
@@ -23,7 +24,7 @@ class TopologizationConfig:
     """Configuration for topologization pipeline."""
 
     # Processing parameters
-    max_chunk_length: int = 800
+    max_fragment_tokens: int = 800
     batch_size: int = 50000
     working_memory_capacity: int = 7
     generation_decay_factor: float = 0.68
@@ -40,6 +41,7 @@ def topologize(
     workspace_path: Path,
     config: TopologizationConfig,
     llm: LLM,
+    encoding: Encoding,
 ) -> Topologization:
     """Execute topologization pipeline and create workspace.
 
@@ -74,7 +76,7 @@ def topologize(
 
     # Step 3: Initialize components
     fragment_writer = FragmentWriter(workspace_path)
-    chunker = TextChunker(fragment_writer, config.max_chunk_length, config.batch_size)
+    fragmenter = TextFragmenter(fragment_writer, encoding, config.max_fragment_tokens, config.batch_size)
     extractor = ChunkExtractor(llm, extraction_guidance)
     working_memory = WorkingMemory(capacity=config.working_memory_capacity)
     wave_reflection = WaveReflection(generation_decay_factor=config.generation_decay_factor)
@@ -83,7 +85,7 @@ def topologize(
     print("\n=== Phase 1: Knowledge Graph Extraction ===")
     knowledge_graph, all_chunks = _extract_knowledge_graph(
         input_file,
-        chunker,
+        fragmenter,
         extractor,
         working_memory,
         wave_reflection,
@@ -91,7 +93,7 @@ def topologize(
     )
 
     # Finalize fragment writing
-    chunker.finalize()
+    fragmenter.finalize()
 
     print(f"\n{'=' * 60}")
     print("=== Knowledge Graph Results ===")
@@ -178,7 +180,7 @@ def _generate_extraction_guidance(
 
 def _extract_knowledge_graph(
     input_file: Path,
-    chunker: TextChunker,
+    fragmenter: TextFragmenter,
     extractor: ChunkExtractor,
     working_memory: WorkingMemory,
     wave_reflection: WaveReflection,
@@ -188,7 +190,7 @@ def _extract_knowledge_graph(
 
     Args:
         input_file: Input text file
-        chunker: Text chunker
+        fragmenter: Text fragmenter
         extractor: Chunk extractor
         working_memory: Working memory
         wave_reflection: Wave reflection
@@ -201,7 +203,7 @@ def _extract_knowledge_graph(
     all_chunks: list[CognitiveChunk] = []
     chunk_count = 0
 
-    for chunk_with_sentences in chunker.stream_chunks_from_file(input_file):
+    for fragment_with_sentences in fragmenter.stream_fragments_from_file(input_file):
         chunk_count += 1
 
         if max_chunks is not None and chunk_count > max_chunks:
@@ -212,10 +214,10 @@ def _extract_knowledge_graph(
 
         # Extract cognitive chunks from text
         extraction_result = extractor.extract_chunks(
-            chunk_with_sentences.text,
+            fragment_with_sentences.text,
             working_memory,
-            chunk_with_sentences.sentence_ids,
-            chunk_with_sentences.sentence_texts,
+            fragment_with_sentences.sentence_ids,
+            fragment_with_sentences.sentence_texts,
         )
 
         if extraction_result is None:

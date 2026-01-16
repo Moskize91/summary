@@ -10,8 +10,36 @@ from pathlib import Path
 
 import networkx as nx
 
+from .fragment import FragmentReader, SentenceId
 from .graph import Graph
-from .storage import FragmentReader, SentenceId
+
+
+@dataclass
+class ChunkEdge:
+    """Represents a directed edge between two chunks in the knowledge graph.
+
+    Attributes:
+        from_chunk: Source chunk
+        to_chunk: Target chunk
+    """
+
+    from_chunk: "Chunk"
+    to_chunk: "Chunk"
+
+
+@dataclass
+class SnakeEdge:
+    """Represents a directed edge between two snakes in the snake graph.
+
+    Attributes:
+        from_snake: Source snake
+        to_snake: Target snake
+        weight: Number of internal chunk-level edges between these snakes
+    """
+
+    from_snake: "Snake"
+    to_snake: "Snake"
+    weight: int
 
 
 @dataclass
@@ -64,29 +92,31 @@ class Chunk:
             _ = self.content
         return self._sentence_ids or []
 
-    def get_outgoing_edges(self) -> list[int]:
-        """Get IDs of chunks this chunk links to.
+    def get_outgoing_edges(self) -> list[ChunkEdge]:
+        """Get edges from this chunk to other chunks.
 
         Returns:
-            List of chunk IDs
+            List of ChunkEdge objects
         """
         cursor = self._topologization._conn.execute(
             "SELECT to_id FROM knowledge_edges WHERE from_id = ?",
             (self.id,),
         )
-        return [row[0] for row in cursor]
+        to_ids = [row[0] for row in cursor]
+        return [ChunkEdge(from_chunk=self, to_chunk=self._topologization.get_chunk(to_id)) for to_id in to_ids]
 
-    def get_incoming_edges(self) -> list[int]:
-        """Get IDs of chunks that link to this chunk.
+    def get_incoming_edges(self) -> list[ChunkEdge]:
+        """Get edges from other chunks to this chunk.
 
         Returns:
-            List of chunk IDs
+            List of ChunkEdge objects
         """
         cursor = self._topologization._conn.execute(
             "SELECT from_id FROM knowledge_edges WHERE to_id = ?",
             (self.id,),
         )
-        return [row[0] for row in cursor]
+        from_ids = [row[0] for row in cursor]
+        return [ChunkEdge(from_chunk=self._topologization.get_chunk(from_id), to_chunk=self) for from_id in from_ids]
 
 
 @dataclass
@@ -126,32 +156,48 @@ class Snake:
         """
         return [self._topologization.get_chunk(cid) for cid in self.chunk_ids]
 
-    def get_outgoing_edges(self) -> list[int]:
-        """Get IDs of snakes this snake links to.
+    def get_outgoing_edges(self) -> list[SnakeEdge]:
+        """Get edges from this snake to other snakes.
 
         Returns:
-            List of snake IDs
+            List of SnakeEdge objects with weights
         """
         cursor = self._topologization._conn.execute(
-            "SELECT to_snake FROM snake_edges WHERE from_snake = ?",
+            "SELECT to_snake, internal_edge_count FROM snake_edges WHERE from_snake = ?",
             (self.snake_id,),
         )
-        return [row[0] for row in cursor]
+        edges_data = [(row[0], row[1]) for row in cursor]
+        return [
+            SnakeEdge(
+                from_snake=self,
+                to_snake=self._topologization.get_snake(to_id),
+                weight=count,
+            )
+            for to_id, count in edges_data
+        ]
 
-    def get_incoming_edges(self) -> list[int]:
-        """Get IDs of snakes that link to this snake.
+    def get_incoming_edges(self) -> list[SnakeEdge]:
+        """Get edges from other snakes to this snake.
 
         Returns:
-            List of snake IDs
+            List of SnakeEdge objects with weights
         """
         cursor = self._topologization._conn.execute(
-            "SELECT from_snake FROM snake_edges WHERE to_snake = ?",
+            "SELECT from_snake, internal_edge_count FROM snake_edges WHERE to_snake = ?",
             (self.snake_id,),
         )
-        return [row[0] for row in cursor]
+        edges_data = [(row[0], row[1]) for row in cursor]
+        return [
+            SnakeEdge(
+                from_snake=self._topologization.get_snake(from_id),
+                to_snake=self,
+                weight=count,
+            )
+            for from_id, count in edges_data
+        ]
 
 
-class KnowledgeGraph(Graph[Chunk]):
+class KnowledgeGraph(Graph[Chunk, ChunkEdge]):
     """Knowledge graph implementation with lazy-loading.
 
     Implements the Graph protocol for chunk-level knowledge graph.
@@ -168,7 +214,7 @@ class KnowledgeGraph(Graph[Chunk]):
         self._topologization = topologization
         # Load graph structure (node IDs + edges) at construction
         self._node_ids: list[int] = []
-        self._edges: list[tuple[int, int]] = []
+        self._edge_tuples: list[tuple[int, int]] = []
         self._load_structure()
 
     def _load_structure(self):
@@ -179,7 +225,7 @@ class KnowledgeGraph(Graph[Chunk]):
 
         # Load all edges
         cursor = self._conn.execute("SELECT from_id, to_id FROM knowledge_edges")
-        self._edges = [(row[0], row[1]) for row in cursor]
+        self._edge_tuples = [(row[0], row[1]) for row in cursor]
 
     def __iter__(self) -> Iterator[Chunk]:
         """Iterate all chunks (lazy-load content on demand).
@@ -201,13 +247,19 @@ class KnowledgeGraph(Graph[Chunk]):
         """
         return self._topologization.get_chunk(chunk_id)
 
-    def get_edges(self) -> list[tuple[int, int]]:
-        """Get all edges as (from_id, to_id) pairs.
+    def get_edges(self) -> list[ChunkEdge]:
+        """Get all edges as ChunkEdge objects.
 
         Returns:
-            List of edge tuples
+            List of ChunkEdge objects
         """
-        return self._edges.copy()
+        return [
+            ChunkEdge(
+                from_chunk=self._topologization.get_chunk(from_id),
+                to_chunk=self._topologization.get_chunk(to_id),
+            )
+            for from_id, to_id in self._edge_tuples
+        ]
 
     def to_networkx(self) -> nx.DiGraph:
         """Convert to NetworkX DiGraph for visualization.
@@ -228,13 +280,13 @@ class KnowledgeGraph(Graph[Chunk]):
             )
 
         # Add all edges
-        for from_id, to_id in self._edges:
+        for from_id, to_id in self._edge_tuples:
             g.add_edge(from_id, to_id)
 
         return g
 
 
-class SnakeGraph(Graph[Snake]):
+class SnakeGraph(Graph[Snake, SnakeEdge]):
     """Snake graph implementation with lazy-loading.
 
     Implements the Graph protocol for snake-level graph.
@@ -251,7 +303,7 @@ class SnakeGraph(Graph[Snake]):
         self._topologization = topologization
         # Load graph structure at construction
         self._snake_ids: list[int] = []
-        self._edges: list[tuple[int, int, int]] = []  # (from, to, count)
+        self._edge_tuples: list[tuple[int, int, int]] = []  # (from, to, count)
         self._load_structure()
 
     def _load_structure(self):
@@ -262,7 +314,7 @@ class SnakeGraph(Graph[Snake]):
 
         # Load all edges with counts
         cursor = self._conn.execute("SELECT from_snake, to_snake, internal_edge_count FROM snake_edges")
-        self._edges = [(row[0], row[1], row[2]) for row in cursor]
+        self._edge_tuples = [(row[0], row[1], row[2]) for row in cursor]
 
     def __iter__(self) -> Iterator[Snake]:
         """Iterate all snakes (lazy-load summaries on demand).
@@ -284,13 +336,20 @@ class SnakeGraph(Graph[Snake]):
         """
         return self._topologization.get_snake(snake_id)
 
-    def get_edges(self) -> list[tuple[int, int, int]]:
-        """Get all edges as (from_id, to_id, count) tuples.
+    def get_edges(self) -> list[SnakeEdge]:
+        """Get all edges as SnakeEdge objects.
 
         Returns:
-            List of edge tuples with internal edge counts
+            List of SnakeEdge objects with weight (internal edge count)
         """
-        return self._edges.copy()
+        return [
+            SnakeEdge(
+                from_snake=self._topologization.get_snake(from_id),
+                to_snake=self._topologization.get_snake(to_id),
+                weight=count,
+            )
+            for from_id, to_id, count in self._edge_tuples
+        ]
 
     def to_networkx(self) -> nx.DiGraph:
         """Convert to NetworkX DiGraph for visualization.
@@ -311,7 +370,7 @@ class SnakeGraph(Graph[Snake]):
             )
 
         # Add all edges
-        for from_id, to_id, count in self._edges:
+        for from_id, to_id, count in self._edge_tuples:
             g.add_edge(from_id, to_id, internal_edge_count=count)
 
         return g
@@ -342,8 +401,8 @@ class Topologization:
         self._fragment_reader = FragmentReader(workspace_path)
 
         # Create graph objects (implement Graph protocol)
-        self.knowledge_graph: Graph[Chunk] = KnowledgeGraph(self._conn, self)
-        self.snake_graph: Graph[Snake] = SnakeGraph(self._conn, self)
+        self.knowledge_graph: Graph[Chunk, ChunkEdge] = KnowledgeGraph(self._conn, self)
+        self.snake_graph: Graph[Snake, SnakeEdge] = SnakeGraph(self._conn, self)
 
     def get_sentence_text(self, sentence_id: SentenceId) -> str:
         """Lazy-load sentence text from fragment.json.
