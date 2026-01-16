@@ -6,13 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import networkx as nx
-from jinja2 import Environment
 
 from ..llm import LLM
 from . import database
 from .api import Topologization
+from .chunk_extraction import ChunkExtractor
 from .cognitive_chunk import CognitiveChunk
-from .extractor import ChunkExtractor
 from .snake_detector import SnakeDetector, split_connected_components
 from .snake_graph_builder import SnakeGraphBuilder
 from .snake_summarizer import SnakeSummarizer
@@ -25,10 +24,6 @@ from .working_memory import WorkingMemory
 @dataclass
 class TopologizationConfig:
     """Configuration for topologization pipeline."""
-
-    # Prompt templates
-    extraction_prompt_file: Path
-    snake_summary_prompt_file: Path
 
     # Processing parameters
     max_chunk_length: int = 800
@@ -48,7 +43,6 @@ def topologize(
     workspace_path: Path,
     config: TopologizationConfig,
     llm: LLM,
-    jinja_env: Environment,
 ) -> Topologization:
     """Execute topologization pipeline and create workspace.
 
@@ -57,7 +51,6 @@ def topologize(
         workspace_path: Directory to store fragments + database
         config: Pipeline configuration
         llm: LLM instance for extraction and summarization
-        jinja_env: Jinja2 environment for prompts
 
     Returns:
         Topologization object for accessing results
@@ -75,14 +68,21 @@ def topologize(
     workspace_path.mkdir(parents=True)
     (workspace_path / "fragments").mkdir()
 
-    # Step 2: Initialize components
+    # Step 2: Generate extraction guidance from intention
+    print("\n=== Meta-Prompt: Generating Extraction Guidance ===")
+    extraction_guidance = _generate_extraction_guidance(
+        intention=intention,
+        llm=llm,
+    )
+
+    # Step 3: Initialize components
     fragment_writer = FragmentWriter(workspace_path)
     chunker = TextChunker(fragment_writer, config.max_chunk_length, config.batch_size)
-    extractor = ChunkExtractor(llm, config.extraction_prompt_file, jinja_env)
+    extractor = ChunkExtractor(llm, extraction_guidance)
     working_memory = WorkingMemory(capacity=config.working_memory_capacity)
     wave_reflection = WaveReflection(generation_decay_factor=config.generation_decay_factor)
 
-    # Step 3: Extract knowledge graph
+    # Step 4: Extract knowledge graph
     print("\n=== Phase 1: Knowledge Graph Extraction ===")
     knowledge_graph, all_chunks = _extract_knowledge_graph(
         input_file,
@@ -102,15 +102,15 @@ def topologize(
     print(f"Total chunks: {knowledge_graph.number_of_nodes()}")
     print(f"Total connections: {knowledge_graph.number_of_edges()}")
 
-    # Step 4: Initialize database
+    # Step 5: Initialize database
     db_path = workspace_path / "database.db"
     conn = database.initialize_database(db_path)
 
-    # Step 5: Save chunks and edges to database
+    # Step 6: Save chunks and edges to database
     print("\nSaving knowledge graph to database...")
     _save_knowledge_graph(conn, knowledge_graph, all_chunks)
 
-    # Step 6: Detect and analyze snakes
+    # Step 7: Detect and analyze snakes
     print(f"\n{'=' * 60}")
     print("=== Phase 2: Thematic Chain Detection ===")
     print(f"{'=' * 60}")
@@ -120,10 +120,9 @@ def topologize(
         all_chunks,
         config,
         llm,
-        jinja_env,
     )
 
-    # Step 7: Save snakes to database
+    # Step 8: Save snakes to database
     print("\nSaving snakes to database...")
     _save_snakes(conn, snakes, snake_summaries, snake_graph, knowledge_graph)
 
@@ -136,8 +135,52 @@ def topologize(
     print(f"Total snakes: {len(snakes)}")
     print(f"Workspace: {workspace_path}")
 
-    # Step 8: Return Topologization object
+    # Step 9: Return Topologization object
     return Topologization(workspace_path)
+
+
+def _generate_extraction_guidance(
+    intention: str,
+    llm: LLM,
+) -> str:
+    """Generate extraction guidance from user intention using meta prompt.
+
+    Args:
+        intention: User's reading intention/goal
+        llm: LLM instance
+
+    Returns:
+        Generated extraction guidance string
+
+    Raises:
+        RuntimeError: If guidance generation fails
+    """
+    print("Generating extraction guidance from intention...")
+
+    # Find prompt template internally
+    intention_prompt_file = Path(__file__).parent / "data" / "intention" / "chunk_extraction.jinja"
+    system_prompt = llm.load_system_prompt(
+        prompt_template_path=intention_prompt_file,
+    )
+    response = llm.request(
+        system_prompt=system_prompt,
+        user_message=intention,
+        temperature=0.3,
+    )
+    if not response:
+        raise RuntimeError(
+            "Failed to generate extraction guidance from intention. "
+            "The meta-prompt LLM call did not return a valid response."
+        )
+
+    guidance = response.strip()
+    if not guidance:
+        raise RuntimeError(
+            "Generated extraction guidance is empty. Please check the intention prompt template and user intention."
+        )
+
+    print(f"✓ Extraction guidance generated ({len(guidance)} characters)")
+    return guidance
 
 
 def _extract_knowledge_graph(
@@ -255,7 +298,6 @@ def _analyze_snakes(
     _all_chunks: list[CognitiveChunk],
     config: TopologizationConfig,
     llm: LLM,
-    jinja_env: Environment,
 ) -> tuple[list[list[int]], list[dict], nx.DiGraph]:
     """Detect snakes and generate summaries.
 
@@ -264,7 +306,6 @@ def _analyze_snakes(
         _all_chunks: All chunks (unused, reserved for future use)
         config: Pipeline configuration
         llm: LLM instance
-        jinja_env: Jinja2 environment
 
     Returns:
         Tuple of (snakes, snake_summaries, snake_graph)
@@ -297,7 +338,7 @@ def _analyze_snakes(
 
     # Summarize snakes
     print("\nGenerating snake summaries...")
-    summarizer = SnakeSummarizer(llm, config.snake_summary_prompt_file, jinja_env)
+    summarizer = SnakeSummarizer(llm)
     snake_summaries = summarizer.summarize_all_snakes(all_snakes, knowledge_graph)
 
     for summary in snake_summaries:

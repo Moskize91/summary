@@ -5,8 +5,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from jinja2 import Environment
-
 from ..llm import LLM
 from .cognitive_chunk import CognitiveChunk
 from .storage import SentenceId
@@ -26,17 +24,18 @@ class ExtractionResult:
 class ChunkExtractor:
     """Extracts cognitive chunks from text using LLM."""
 
-    def __init__(self, llm: LLM, prompt_template_path: Path, jinja_env: Environment):
+    def __init__(self, llm: LLM, extraction_guidance: str):
         """Initialize the extractor.
 
         Args:
             llm: LLM client instance
-            prompt_template_path: Path to the extraction prompt template
-            jinja_env: Jinja2 Environment for loading templates
+            extraction_guidance: Pre-generated guidance from user intention
         """
         self.llm = llm
-        self.prompt_template_path = prompt_template_path
-        self.jinja_env = jinja_env
+        self.extraction_guidance = extraction_guidance
+
+        # Find prompt template internally
+        self.prompt_template_path = Path(__file__).parent / "data" / "topologization" / "chunk_extraction.jinja"
 
     def extract_chunks(
         self,
@@ -60,15 +59,14 @@ class ChunkExtractor:
         # Build prompt
         system_prompt = self.llm.load_system_prompt(
             self.prompt_template_path,
-            self.jinja_env,
+            extraction_guidance=self.extraction_guidance,
             working_memory=working_memory.format_for_prompt(),
-            new_text=text,
         )
 
         # Call LLM
         response = self.llm.request(
             system_prompt=system_prompt,
-            user_message="Please extract key information in JSON format.",
+            user_message=text,
             temperature=0.3,  # Lower temperature for more consistent extraction
         )
 
@@ -106,9 +104,7 @@ class ChunkExtractor:
                             seen_ids.add(sid)
                     else:
                         # If no exact match, try fuzzy matching
-                        matched_id = self._fuzzy_match_sentence(
-                            source_sent, chunk_sentence_texts, sentence_text_to_id
-                        )
+                        matched_id = self._fuzzy_match_sentence(source_sent, chunk_sentence_texts, sentence_text_to_id)
                         if matched_id and matched_id not in seen_ids:
                             matched_sentence_ids.append(matched_id)
                             seen_ids.add(matched_id)

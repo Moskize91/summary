@@ -1,11 +1,7 @@
 """Working memory manager for cognitive chunks."""
 
-from typing import TYPE_CHECKING
-
+from .chunk_extraction import ExtractionResult
 from .cognitive_chunk import CognitiveChunk
-
-if TYPE_CHECKING:
-    from .extractor import ExtractionResult
 
 
 class WorkingMemory:

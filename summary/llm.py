@@ -9,8 +9,9 @@ from logging import DEBUG, FileHandler, Formatter, Logger, getLogger
 from pathlib import Path
 from time import sleep
 
-from jinja2 import Environment
 from openai import OpenAI
+
+from .template import create_env
 
 # Global state for logger filename generation
 _LOGGER_LOCK = threading.Lock()
@@ -24,6 +25,7 @@ class LLM:
     def __init__(
         self,
         config_path: Path,
+        data_dir_path: Path,
         log_dir_path: Path | None = None,
         cache_dir_path: Path | None = None,
         retry_times: int = 5,
@@ -33,6 +35,7 @@ class LLM:
 
         Args:
             config_path: Path to the configuration JSON file
+            data_dir_path: Path to the data directory containing Jinja templates
             log_dir_path: Directory path for saving logs
             cache_dir_path: Directory path for caching responses
             retry_times: Number of retry attempts on failure
@@ -52,6 +55,9 @@ class LLM:
         self.top_p = self.config.get("top_p", 0.6)
         self.retry_times = retry_times
         self.retry_interval_seconds = retry_interval_seconds
+
+        # Setup Jinja environment
+        self.jinja_env = create_env(data_dir_path)
 
         # Setup logging and caching
         self._log_dir_path = self._ensure_dir_path(log_dir_path)
@@ -247,16 +253,15 @@ class LLM:
 
         return response
 
-    def load_system_prompt(self, prompt_template_path: Path, jinja_env: Environment, **kwargs) -> str:
+    def load_system_prompt(self, prompt_template_path: Path, **kwargs) -> str:
         """Load and render the system prompt from a Jinja template.
 
         Args:
             prompt_template_path: Path to the prompt.jinja file
-            jinja_env: Jinja2 Environment for loading templates
             **kwargs: Variables to pass to the template
 
         Returns:
             Rendered system prompt
         """
-        template = jinja_env.get_template(prompt_template_path.name)
+        template = self.jinja_env.get_template(prompt_template_path.name)
         return template.render(**kwargs)

@@ -22,7 +22,7 @@ if __name__ == "__main__":
         "--cache",
         str(cache_dir),
         "--max-chunks",
-        "40",  # Process first 40 chunks for testing
+        "5",
     ]
 
     # Run CLI

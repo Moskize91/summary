@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 from .llm import LLM
-from .template import create_env
 from .topologization import TopologizationConfig, topologize
 
 
@@ -130,34 +129,19 @@ def main(args: list[str] | None = None) -> int:
     # Handle max_chunks = 0 (unlimited)
     max_chunks = parsed_args.max_chunks if parsed_args.max_chunks > 0 else None
 
-    # Setup prompt file paths
+    # Setup data directory for templates
     data_dir = Path(__file__).parent / "data"
-    extraction_prompt_file = data_dir / "topologization" / "chunk_extraction.jinja"
-    snake_summary_prompt_file = data_dir / "topologization" / "snake_summary.jinja"
-
-    # Validate prompt files
-    if not extraction_prompt_file.exists():
-        print(f"Error: Extraction prompt file not found: {extraction_prompt_file}", file=sys.stderr)
-        return 1
-
-    if not snake_summary_prompt_file.exists():
-        print(f"Error: Snake summary prompt file not found: {snake_summary_prompt_file}", file=sys.stderr)
-        return 1
 
     # Create LLM instance
     llm = LLM(
         config_path=parsed_args.config,
+        data_dir_path=data_dir,
         log_dir_path=log_dir,
         cache_dir_path=cache_dir,
     )
 
-    # Create Jinja2 environment
-    jinja_env = create_env(data_dir)
-
     # Create pipeline configuration
     config = TopologizationConfig(
-        extraction_prompt_file=extraction_prompt_file,
-        snake_summary_prompt_file=snake_summary_prompt_file,
         max_chunk_length=parsed_args.chunk_length,
         working_memory_capacity=parsed_args.memory_capacity,
         generation_decay_factor=parsed_args.decay_factor,
@@ -169,13 +153,12 @@ def main(args: list[str] | None = None) -> int:
     try:
         # Run topologization
         _ = topologize(
+            intention="帮我压缩这本书，其中元朝的政策和元朝治下的百姓生存环境是重点，要尽可能保留，其他可以省略。",
             input_file=parsed_args.input_file,
             workspace_path=parsed_args.workspace,
             config=config,
             llm=llm,
-            jinja_env=jinja_env,
         )
-
         # Print summary
         print("\nWorkspace created successfully!")
         print(f"Workspace path: {parsed_args.workspace}")
