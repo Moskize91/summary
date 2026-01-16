@@ -6,6 +6,16 @@ from .storage import SentenceId
 
 
 @dataclass
+class ChunkBatch:
+    """A batch of extracted chunks with their relationships."""
+
+    chunks: list["CognitiveChunk"]  # Extracted chunks (id=0, to be assigned)
+    temp_ids: list[str]  # Temporary IDs corresponding to chunks
+    links: list[dict]  # Raw link data: [{"from": ..., "to": ...}]
+    order_correct: bool  # Whether JSON key order was correct
+
+
+@dataclass
 class CognitiveChunk:
     """A cognitive chunk representing a unit of information in working memory.
 

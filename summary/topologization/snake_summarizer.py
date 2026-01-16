@@ -1,5 +1,3 @@
-"""Summarize detected snakes using LLM."""
-
 from pathlib import Path
 
 import networkx as nx
@@ -22,8 +20,8 @@ class SnakeSummarizer:
         """
         self.llm = llm
 
-        # Find prompt template internally
-        self.prompt_template_path = Path(__file__).parent / "data" / "topologization" / "snake_summary.jinja"
+        # Find prompt template internally (relative to summary/data/)
+        self.prompt_template_path = Path(__file__).parent.parent / "data" / "topologization" / "snake_summary.jinja"
 
     def summarize_snake(self, snake_nodes: list[dict]) -> str:
         """Generate a narrative summary for a snake.

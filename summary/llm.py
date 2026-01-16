@@ -57,6 +57,7 @@ class LLM:
         self.retry_interval_seconds = retry_interval_seconds
 
         # Setup Jinja environment
+        self._data_dir_path = data_dir_path.resolve()
         self.jinja_env = create_env(data_dir_path)
 
         # Setup logging and caching
@@ -263,5 +264,15 @@ class LLM:
         Returns:
             Rendered system prompt
         """
-        template = self.jinja_env.get_template(prompt_template_path.name)
+        # Calculate relative path from data directory
+        # The template path should be relative to data_dir for jinja to find it
+        try:
+            # Try to get relative path from data dir
+            relative_path = prompt_template_path.relative_to(self._data_dir_path)
+            template_name = str(relative_path)
+        except ValueError:
+            # If not relative to data_dir, just use the name (backward compatibility)
+            template_name = prompt_template_path.name
+
+        template = self.jinja_env.get_template(template_name)
         return template.render(**kwargs)

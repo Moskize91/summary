@@ -2,23 +2,12 @@
 
 import json
 import re
-from dataclasses import dataclass
 from pathlib import Path
 
 from ..llm import LLM
-from .cognitive_chunk import CognitiveChunk
+from .cognitive_chunk import ChunkBatch, CognitiveChunk
 from .storage import SentenceId
 from .working_memory import WorkingMemory
-
-
-@dataclass
-class ExtractionResult:
-    """Result of chunk extraction containing chunks and their relationships."""
-
-    chunks: list[CognitiveChunk]  # Extracted chunks (id=0, to be assigned)
-    temp_ids: list[str]  # Temporary IDs corresponding to chunks
-    links: list[dict]  # Raw link data: [{"from": ..., "to": ...}]
-    order_correct: bool  # Whether JSON key order was correct
 
 
 class ChunkExtractor:
@@ -34,8 +23,8 @@ class ChunkExtractor:
         self.llm = llm
         self.extraction_guidance = extraction_guidance
 
-        # Find prompt template internally
-        self.prompt_template_path = Path(__file__).parent / "data" / "topologization" / "chunk_extraction.jinja"
+        # Find prompt template internally (relative to summary/data/)
+        self.prompt_template_path = Path(__file__).parent.parent / "data" / "topologization" / "chunk_extraction.jinja"
 
     def extract_chunks(
         self,
@@ -43,7 +32,7 @@ class ChunkExtractor:
         working_memory: WorkingMemory,
         chunk_sentence_ids: list[SentenceId],
         chunk_sentence_texts: list[str],
-    ) -> ExtractionResult | None:
+    ) -> ChunkBatch | None:
         """Extract cognitive chunks from text.
 
         Args:
@@ -53,7 +42,7 @@ class ChunkExtractor:
             chunk_sentence_texts: List of sentence texts corresponding to sentence IDs
 
         Returns:
-            ExtractionResult containing chunks, temp_ids, links, and order correctness
+            ChunkBatch containing chunks, temp_ids, links, and order correctness
             None if extraction failed
         """
         # Build prompt
@@ -128,7 +117,7 @@ class ChunkExtractor:
                 chunks.append(chunk)
                 temp_ids.append(data.get("temp_id", ""))
 
-            return ExtractionResult(
+            return ChunkBatch(
                 chunks=chunks,
                 temp_ids=temp_ids,
                 links=links_data,

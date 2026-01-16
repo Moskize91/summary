@@ -1,5 +1,3 @@
-"""Topologization pipeline implementation - workspace-based processing."""
-
 import shutil
 import sqlite3
 from dataclasses import dataclass
@@ -157,10 +155,11 @@ def _generate_extraction_guidance(
     """
     print("Generating extraction guidance from intention...")
 
-    # Find prompt template internally
-    intention_prompt_file = Path(__file__).parent / "data" / "intention" / "chunk_extraction.jinja"
+    # Find prompt template internally (relative to summary/data/)
+    intention_prompt_file = Path(__file__).parent.parent / "data" / "intention" / "chunk_extraction.jinja"
     system_prompt = llm.load_system_prompt(
-        prompt_template_path=intention_prompt_file,
+        intention_prompt_file,
+        intention=intention,
     )
     response = llm.request(
         system_prompt=system_prompt,

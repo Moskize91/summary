@@ -1,7 +1,4 @@
-"""Working memory manager for cognitive chunks."""
-
-from .chunk_extraction import ExtractionResult
-from .cognitive_chunk import CognitiveChunk
+from .cognitive_chunk import ChunkBatch, CognitiveChunk
 
 
 class WorkingMemory:
@@ -48,13 +45,11 @@ class WorkingMemory:
 
         self._chunks = [chunk for chunk, _ in scored_chunks[: self.capacity]]
 
-    def add_chunks_with_links(
-        self, extraction_result: "ExtractionResult"
-    ) -> tuple[list[CognitiveChunk], list[tuple[int, int]]]:
+    def add_chunks_with_links(self, chunk_batch: ChunkBatch) -> tuple[list[CognitiveChunk], list[tuple[int, int]]]:
         """Add new chunks with link processing to working memory.
 
         Args:
-            extraction_result: ExtractionResult from extractor
+            chunk_batch: ChunkBatch from extractor
 
         Returns:
             Tuple of (added_chunks, edges) where edges is list of (from_id, to_id) tuples
@@ -66,7 +61,7 @@ class WorkingMemory:
         temp_id_map = {}
 
         # Assign IDs and generation to new chunks
-        for chunk, temp_id in zip(extraction_result.chunks, extraction_result.temp_ids):
+        for chunk, temp_id in zip(chunk_batch.chunks, chunk_batch.temp_ids):
             chunk.id = self._next_id
             chunk.generation = self._generation
             temp_id_map[temp_id] = chunk
@@ -74,7 +69,7 @@ class WorkingMemory:
 
         # Process links and build chunk.links arrays + collect edges
         edges = []
-        for link in extraction_result.links:
+        for link in chunk_batch.links:
             from_ref = link["from"]
             to_ref = link["to"]
 
@@ -128,14 +123,14 @@ class WorkingMemory:
                 edge_to_id = from_chunk.id
 
             # Add link to the "to" chunk's links array (edge_to_id is linked FROM edge_from_id)
-            for chunk in extraction_result.chunks:
+            for chunk in chunk_batch.chunks:
                 if chunk.id == edge_to_id:
                     if edge_from_id not in chunk.links:
                         chunk.links.append(edge_from_id)
                     break
 
             # Also check existing chunks in working memory
-            if edge_to_id not in [c.id for c in extraction_result.chunks]:
+            if edge_to_id not in [c.id for c in chunk_batch.chunks]:
                 for chunk in self._chunks:
                     if chunk.id == edge_to_id:
                         if edge_from_id not in chunk.links:
@@ -146,7 +141,7 @@ class WorkingMemory:
             edges.append((edge_from_id, edge_to_id))
 
         # Merge new and existing chunks for working memory
-        all_chunks = self._chunks + extraction_result.chunks
+        all_chunks = self._chunks + chunk_batch.chunks
 
         # Calculate scores and keep top-k
         scored_chunks = [(chunk, self._calculate_score(chunk, all_chunks)) for chunk in all_chunks]
@@ -154,7 +149,7 @@ class WorkingMemory:
 
         self._chunks = [chunk for chunk, _ in scored_chunks[: self.capacity]]
 
-        return extraction_result.chunks, edges
+        return chunk_batch.chunks, edges
 
     def _calculate_score(self, chunk: CognitiveChunk, all_chunks: list[CognitiveChunk]) -> float:
         """Calculate importance score for a chunk.

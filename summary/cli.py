@@ -118,10 +118,8 @@ def main(args: list[str] | None = None) -> int:
         print(f"Error: Config file not found: {parsed_args.config}", file=sys.stderr)
         return 1
 
-    # Setup log directory (default to logs/ if not specified)
+    # Setup log directory
     log_dir = parsed_args.log
-    if log_dir is None:
-        log_dir = Path("logs")
 
     # Setup cache directory
     cache_dir = parsed_args.cache
