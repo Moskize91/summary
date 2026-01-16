@@ -93,17 +93,28 @@ class ChunkExtractor:
                             seen_ids.add(sid)
                     else:
                         # If no exact match, try fuzzy matching
-                        matched_id = self._fuzzy_match_sentence(source_sent, chunk_sentence_texts, sentence_text_to_id)
-                        if matched_id and matched_id not in seen_ids:
-                            matched_sentence_ids.append(matched_id)
-                            seen_ids.add(matched_id)
+                        matched_ids = self._fuzzy_match_sentence(
+                            source_sent, chunk_sentence_texts, sentence_text_to_id
+                        )
+                        for matched_id in matched_ids:
+                            if matched_id not in seen_ids:
+                                matched_sentence_ids.append(matched_id)
+                                seen_ids.add(matched_id)
 
                 # If no sentences matched, use minimum sentence ID as fallback
                 if not matched_sentence_ids:
-                    matched_sentence_ids = [min(chunk_sentence_ids)] if chunk_sentence_ids else [(0, 0)]
+                    fallback_id = min(chunk_sentence_ids) if chunk_sentence_ids else (0, 0)
+                    matched_sentence_ids = [fallback_id]
+                    print(f"[[WARNING]] Failed to match source_sentences for chunk '{data.get('label', 'unknown')}'")
+                    print(f"  Source sentences: {source_sentences[:1]}...")  # Show first source sentence
+                    print(f"  Using fallback sentence_id: {fallback_id}")
 
                 # Use first matched sentence ID as primary sentence_id (for sorting)
                 primary_sentence_id = matched_sentence_ids[0]
+
+                # Parse type field (default to 1=user_focused if not present)
+                chunk_type_str = data.get("type", "user_focused")
+                chunk_type = 1 if chunk_type_str == "user_focused" else 2
 
                 chunk = CognitiveChunk(
                     id=0,  # Will be assigned by WorkingMemory
@@ -112,6 +123,7 @@ class ChunkExtractor:
                     sentence_ids=matched_sentence_ids,  # Store all matched sentence IDs
                     label=data.get("label", ""),
                     content=data.get("content", ""),
+                    chunk_type=chunk_type,
                     links=[],  # Will be populated after ID assignment
                 )
                 chunks.append(chunk)
@@ -195,44 +207,61 @@ class ChunkExtractor:
         source_sent: str,
         candidate_texts: list[str],
         text_to_id: dict[str, SentenceId],
-    ) -> SentenceId | None:
-        """Find best matching sentence using fuzzy matching.
+    ) -> list[SentenceId]:
+        """Find all matching sentences using fuzzy matching.
 
         Args:
-            source_sent: Source sentence to match
+            source_sent: Source sentence to match (may contain multiple actual sentences)
             candidate_texts: List of candidate sentence texts
             text_to_id: Mapping from sentence text to sentence ID
 
         Returns:
-            Matched sentence ID, or None if no good match found
+            List of matched sentence IDs (may be multiple if source contains multiple sentences)
         """
-        # Normalize source sentence (strip whitespace, convert to lowercase)
-        normalized_source = source_sent.strip().lower()
+        # Normalize source sentence (strip whitespace, remove newlines)
+        normalized_source = source_sent.strip().replace('\n', ' ').lower()
 
-        # Try to find best match
-        best_match = None
-        best_score = 0.0
+        matched_ids = []
 
         for candidate in candidate_texts:
-            normalized_candidate = candidate.strip().lower()
+            normalized_candidate = candidate.strip().replace('\n', ' ').lower()
 
-            # Simple similarity: ratio of common characters
-            # This is a simple approach; could use Levenshtein distance or other algorithms
+            # Check if they are exactly the same
             if normalized_source == normalized_candidate:
-                return text_to_id[candidate]
+                return [text_to_id[candidate]]
 
-            # Calculate overlap ratio
-            if len(normalized_source) > 0:
-                # Count how many characters from source appear in candidate
-                common_chars = sum(1 for c in normalized_source if c in normalized_candidate)
-                score = common_chars / len(normalized_source)
+            # Check if candidate is a substring of source (LLM merged multiple sentences)
+            # Use a similarity threshold to handle minor variations
+            if len(normalized_candidate) >= 20:  # Only for substantial text
+                # Remove common punctuation and spaces for comparison
+                source_clean = (
+                    normalized_source.replace(' ', '')
+                    .replace('，', '')
+                    .replace('。', '')
+                    .replace('、', '')
+                )
+                candidate_clean = (
+                    normalized_candidate.replace(' ', '')
+                    .replace('，', '')
+                    .replace('。', '')
+                    .replace('、', '')
+                )
 
-                if score > best_score:
-                    best_score = score
-                    best_match = candidate
+                # Check if candidate appears in source (with 90% character match)
+                if len(candidate_clean) > 0:
+                    # Find longest common substring length
+                    match_len = 0
+                    for i in range(len(source_clean)):
+                        for j in range(len(candidate_clean)):
+                            k = 0
+                            while (i + k < len(source_clean) and
+                                   j + k < len(candidate_clean) and
+                                   source_clean[i + k] == candidate_clean[j + k]):
+                                k += 1
+                            match_len = max(match_len, k)
 
-        # Return best match if score is above threshold (80%)
-        if best_score > 0.8 and best_match:
-            return text_to_id[best_match]
+                    similarity = match_len / len(candidate_clean)
+                    if similarity >= 0.8:  # 80% similarity threshold
+                        matched_ids.append(text_to_id[candidate])
 
-        return None
+        return matched_ids if matched_ids else []

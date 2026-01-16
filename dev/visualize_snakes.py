@@ -241,6 +241,7 @@ def _generate_html_wrapper(
             "sentence_id": node["sentence_id"],
             "label": node["label"],
             "content": node["content"],
+            "type": node.get("type", "unknown"),  # Add type field
         }
         # Add snake info
         if node["id"] in node_to_snake:
@@ -495,10 +496,13 @@ def _generate_html_wrapper(
                     snakeInfo = `<div class="tooltip-snake">🐍 Snake ${{data.snake_id}}</div>`;
                 }}
 
+                // Format type display
+                const typeLabel = data.type === 'user_focused' ? '👤 User Focused' : '📖 Book Coherence';
+
                 const tooltipHTML = `
                     ${{snakeInfo}}
                     <div class="tooltip-label">${{data.label}}</div>
-                    <div class="tooltip-meta">ID: ${{data.id}} | Sentence ID: ${{data.sentence_id}}</div>
+                    <div class="tooltip-meta">ID: ${{data.id}} | Sentence ID: ${{data.sentence_id}} | Type: ${{typeLabel}}</div>
                     <div class="tooltip-content">${{data.content}}</div>
                 `;
                 tooltip.innerHTML = tooltipHTML;

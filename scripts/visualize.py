@@ -5,7 +5,7 @@ from pathlib import Path
 import networkx as nx
 
 from dev.visualize_snakes import visualize_snakes
-from summary.topologization import Topologization
+from summary.topologization import ChunkType, Topologization
 
 
 def main():
@@ -36,6 +36,7 @@ def main():
             generation=chunk.generation,
             sentence_id=chunk.sentence_id,
             label=chunk.label,
+            type=chunk.type,
             # Don't add content to save memory
         )
 
@@ -69,12 +70,15 @@ def main():
     # Load content from Topologization for each node
     for node_id, data in graph.nodes(data=True):
         chunk = topo.get_chunk(node_id)
+        # Format type as readable string
+        type_str = "user_focused" if chunk.type == ChunkType.USER_FOCUSED else "book_coherence"
         graph_data["nodes"].append(
             {
                 "id": node_id,
                 "generation": data.get("generation", 0),
                 "sentence_id": data.get("sentence_id", (0, 0)),
                 "label": data.get("label", ""),
+                "type": type_str,
                 "content": chunk.content,  # Lazy-loaded from fragments
             }
         )

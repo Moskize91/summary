@@ -6,12 +6,25 @@
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from enum import IntEnum
 from pathlib import Path
 
 import networkx as nx
 
 from .fragment import FragmentReader, SentenceId
 from .graph import Graph
+
+
+class ChunkType(IntEnum):
+    """Type of cognitive chunk based on extraction focus.
+
+    Attributes:
+        USER_FOCUSED: Chunk extracted based on user's specific intention
+        BOOK_COHERENCE: Chunk extracted to maintain book's narrative coherence
+    """
+
+    USER_FOCUSED = 1
+    BOOK_COHERENCE = 2
 
 
 @dataclass
@@ -39,7 +52,7 @@ class SnakeEdge:
 
     from_snake: "Snake"
     to_snake: "Snake"
-    weight: int
+    chunk_edge_count: int
 
 
 @dataclass
@@ -53,6 +66,7 @@ class Chunk:
     generation: int
     sentence_id: SentenceId  # Primary sentence ID for ordering
     label: str
+    type: ChunkType  # Type of chunk (user_focused or book_coherence)
     _topologization: "Topologization" = field(repr=False)  # Reference for lazy loading
     _content: str | None = field(default=None, repr=False)  # Lazy-loaded
     _sentence_ids: list[SentenceId] | None = field(default=None, repr=False)  # Lazy-loaded
@@ -171,7 +185,7 @@ class Snake:
             SnakeEdge(
                 from_snake=self,
                 to_snake=self._topologization.get_snake(to_id),
-                weight=count,
+                chunk_edge_count=count,
             )
             for to_id, count in edges_data
         ]
@@ -191,7 +205,7 @@ class Snake:
             SnakeEdge(
                 from_snake=self._topologization.get_snake(from_id),
                 to_snake=self,
-                weight=count,
+                chunk_edge_count=count,
             )
             for from_id, count in edges_data
         ]
@@ -346,7 +360,7 @@ class SnakeGraph(Graph[Snake, SnakeEdge]):
             SnakeEdge(
                 from_snake=self._topologization.get_snake(from_id),
                 to_snake=self._topologization.get_snake(to_id),
-                weight=count,
+                chunk_edge_count=count,
             )
             for from_id, to_id, count in self._edge_tuples
         ]
@@ -428,7 +442,7 @@ class Topologization:
             ValueError: If chunk not found
         """
         cursor = self._conn.execute(
-            "SELECT id, generation, fragment_id, sentence_index, label FROM chunks WHERE id = ?",
+            "SELECT id, generation, fragment_id, sentence_index, label, type FROM chunks WHERE id = ?",
             (chunk_id,),
         )
         row = cursor.fetchone()
@@ -440,6 +454,7 @@ class Topologization:
             generation=row[1],
             sentence_id=(row[2], row[3]),
             label=row[4],
+            type=ChunkType(row[5]),
             _topologization=self,
         )
 

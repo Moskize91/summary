@@ -1,4 +1,4 @@
-from .api import Chunk, ChunkEdge, Snake, SnakeEdge, Topologization
+from .api import Chunk, ChunkEdge, ChunkType, Snake, SnakeEdge, Topologization
 from .fragment import SentenceId
 from .topologize import TopologizationConfig, topologize
 
@@ -10,6 +10,7 @@ __all__ = [
     # Data types
     "Chunk",
     "ChunkEdge",
+    "ChunkType",
     "Snake",
     "SnakeEdge",
     "SentenceId",

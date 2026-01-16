@@ -280,6 +280,7 @@ def _save_knowledge_graph(
             chunk.generation,
             chunk.sentence_id,
             chunk.label,
+            chunk.chunk_type,
             sentence_ids,
         )
 
