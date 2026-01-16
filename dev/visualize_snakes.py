@@ -1,7 +1,6 @@
 """Visualize detected snakes with color-coded clusters."""
 
 import json
-import re
 from pathlib import Path
 
 import networkx as nx

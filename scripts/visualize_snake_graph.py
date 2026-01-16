@@ -5,8 +5,7 @@ from pathlib import Path
 
 from dev.snake_detector import load_graph_from_json
 from dev.visualize_snake_graph import visualize_snake_graph
-from summary.edge_importance import EdgeImportanceCalculator
-from summary.snake_graph_builder import SnakeGraphBuilder
+from summary.topologization.snake_graph_builder import SnakeGraphBuilder
 
 
 def main():
@@ -54,15 +53,10 @@ def main():
         snake_summaries = json.load(f)
     print(f"Loaded {len(snake_summaries)} summaries")
 
-    # Calculate edge importance
-    print("\nCalculating edge importance...")
-    calculator = EdgeImportanceCalculator(graph)
-    edge_importance = calculator.compute_combined_importance()
-
     # Build snake-level graph
     print("\nBuilding snake-level graph...")
     builder = SnakeGraphBuilder()
-    snake_graph = builder.build_snake_graph(snakes, graph, edge_importance)
+    snake_graph = builder.build_snake_graph(snakes, graph)
 
     print(f"Snake graph: {len(snake_graph.nodes())} snakes, {len(snake_graph.edges())} inter-snake edges")
 

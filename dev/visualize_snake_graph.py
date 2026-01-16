@@ -67,9 +67,7 @@ def visualize_snake_graph(
 
         # Node label
         label = (
-            f"Snake {snake_id}\\n"
-            f"{node_data['first_label']} → {node_data['last_label']}\\n"
-            f"({node_data['size']} nodes)"
+            f"Snake {snake_id}\\n{node_data['first_label']} → {node_data['last_label']}\\n({node_data['size']} nodes)"
         )
 
         # Tooltip with summary and node IDs

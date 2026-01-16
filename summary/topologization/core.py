@@ -10,7 +10,6 @@ from jinja2 import Environment
 
 from ..llm import LLM
 from .cognitive_chunk import CognitiveChunk
-from .edge_importance import EdgeImportanceCalculator
 from .extractor import ChunkExtractor
 from .snake_detector import SnakeDetector, split_connected_components
 from .snake_graph_builder import SnakeGraphBuilder
@@ -297,11 +296,8 @@ class TopologizationPipeline:
         print("=== Building Snake Graph ===")
         print(f"{'=' * 60}")
 
-        calculator = EdgeImportanceCalculator(knowledge_graph)
-        edge_importance = calculator.compute_combined_importance()
-
         builder = SnakeGraphBuilder()
-        snake_graph = builder.build_snake_graph(all_snakes, knowledge_graph, edge_importance)
+        snake_graph = builder.build_snake_graph(all_snakes, knowledge_graph)
 
         print(f"Snake graph: {len(snake_graph.nodes())} snakes, {len(snake_graph.edges())} inter-snake edges")
 
@@ -391,7 +387,6 @@ class TopologizationPipeline:
                     "to_snake": snake_to,
                     "from_label": from_node["label"],
                     "to_label": to_node["label"],
-                    "importance": edge_data["importance"],
                     "internal_edge_count": edge_data["internal_edge_count"],
                 }
             )
@@ -550,10 +545,7 @@ class ThematicChainAnalyzer:
         snake_summaries = summarizer.summarize_all_snakes(all_snakes, knowledge_graph)
 
         # Build snake graph
-        calculator = EdgeImportanceCalculator(knowledge_graph)
-        edge_importance = calculator.compute_combined_importance()
-
         builder = SnakeGraphBuilder()
-        snake_graph = builder.build_snake_graph(all_snakes, knowledge_graph, edge_importance)
+        snake_graph = builder.build_snake_graph(all_snakes, knowledge_graph)
 
         return all_snakes, snake_summaries, snake_graph

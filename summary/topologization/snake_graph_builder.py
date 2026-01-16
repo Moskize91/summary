@@ -14,21 +14,19 @@ class SnakeGraphBuilder:
         self,
         snakes: list[list[int]],
         knowledge_graph: nx.DiGraph,
-        edge_importance: dict[frozenset, float],
     ) -> nx.DiGraph:
         """Build snake-level graph from knowledge graph and detected snakes.
 
         Args:
             snakes: List of snakes (each is a list of node IDs)
             knowledge_graph: Original graph with node-level connections
-            edge_importance: Dict mapping edge (frozenset) to importance score [0.0, 1.0]
 
         Returns:
             Snake-level directed graph with:
                 - Nodes: snake IDs (0, 1, 2, ...)
                 - Node attributes: size, first_label, last_label, node_ids
                 - Edges: (snake_from, snake_to)
-                - Edge attributes: importance, internal_edge_count
+                - Edge attributes: internal_edge_count
         """
         # Build node_to_snake mapping
         node_to_snake = {}
@@ -54,7 +52,7 @@ class SnakeGraphBuilder:
 
         # Find inter-snake edges
         # Group edges by (snake_from, snake_to) pair
-        inter_snake_edges = {}  # (snake_from, snake_to) -> list of (node_from, node_to, importance)
+        inter_snake_edges = {}  # (snake_from, snake_to) -> count
 
         for edge in knowledge_graph.edges():
             node_from, node_to = edge
@@ -70,26 +68,16 @@ class SnakeGraphBuilder:
             if snake_from == snake_to:
                 continue
 
-            # Get edge importance
-            edge_key = frozenset([node_from, node_to])
-            importance = edge_importance.get(edge_key, 0.5)
-
-            # Add to inter-snake edge list
+            # Add to inter-snake edge count
             snake_edge_key = (snake_from, snake_to)
             if snake_edge_key not in inter_snake_edges:
-                inter_snake_edges[snake_edge_key] = []
+                inter_snake_edges[snake_edge_key] = 0
 
-            inter_snake_edges[snake_edge_key].append((node_from, node_to, importance))
+            inter_snake_edges[snake_edge_key] += 1
 
-        # Create snake-level edges with aggregated attributes
+        # Create snake-level edges
         # Normalize edge direction based on snake's starting sentence_id
-        for (snake_from, snake_to), edge_list in inter_snake_edges.items():
-            # Calculate aggregated importance (use maximum)
-            max_importance = max(importance for _, _, importance in edge_list)
-
-            # Count internal edges
-            internal_edge_count = len(edge_list)
-
+        for (snake_from, snake_to), edge_count in inter_snake_edges.items():
             # Get starting sentence_id for both snakes
             snake_from_start_sid = knowledge_graph.nodes[snakes[snake_from][0]]["sentence_id"]
             snake_to_start_sid = knowledge_graph.nodes[snakes[snake_to][0]]["sentence_id"]
@@ -104,18 +92,15 @@ class SnakeGraphBuilder:
 
             # Add edge to snake graph (or update if already exists)
             if snake_graph.has_edge(final_from, final_to):
-                # Edge already exists, update with max importance
-                existing_importance = snake_graph.edges[final_from, final_to]["importance"]
+                # Edge already exists, accumulate count
                 existing_count = snake_graph.edges[final_from, final_to]["internal_edge_count"]
-                snake_graph.edges[final_from, final_to]["importance"] = max(existing_importance, max_importance)
-                snake_graph.edges[final_from, final_to]["internal_edge_count"] = existing_count + internal_edge_count
+                snake_graph.edges[final_from, final_to]["internal_edge_count"] = existing_count + edge_count
             else:
                 # Add new edge
                 snake_graph.add_edge(
                     final_from,
                     final_to,
-                    importance=max_importance,
-                    internal_edge_count=internal_edge_count,
+                    internal_edge_count=edge_count,
                 )
 
         return snake_graph
