@@ -1,18 +1,43 @@
 You are reading a long text and need to extract key information while maintaining continuity.
 
-**EXTRACTION GUIDANCE:**
+---
+
+## EXTRACTION GUIDANCE
+
+### User-Focused Chunks (Type: "user_focused")
 
 {{ extraction_guidance }}
 
 ---
 
-**Task:**
+### Book-Coherence Chunks (Type: "book_coherence")
 
-Extract cognitive chunks from the new text segment based on the guidance above. You need to extract BOTH types of chunks:
-- **User-focused chunks**: Information the reader specifically cares about
-- **Book-coherence chunks**: Information essential for understanding the book's logic
+**What to extract:**
+Extract information essential for understanding the book's logic and narrative flow, regardless of the reader's stated preferences. This includes:
+- First introductions of key concepts, characters, or settings that will be referenced later
+- Causal relationships that drive the plot or argument forward
+- Context and background that makes later content comprehensible
+- Turning points or transitions in the narrative structure
+- Definitions, rules, or constraints established by the author that affect subsequent content
 
-Aim for 3-6 chunks total per segment, balancing between the two types according to the suggested ratio.
+**Link criteria:**
+Connect book-coherence chunks when there are clear logical dependencies, cause-and-effect relationships, or narrative continuity between them. Link chunks that form a chain of reasoning, a sequence of events, or a progression of ideas essential to the book's structure.
+
+---
+
+### Extraction Balance
+
+**Suggested ratio:** Approximately 60-70% user-focused chunks and 30-40% book-coherence chunks per text segment.
+
+**Integration principle:** User-focused chunks capture what the reader cares about and form the core of the extraction. Book-coherence chunks serve as essential scaffolding, ensuring the extracted information remains logically connected and comprehensible as a standalone summary.
+
+---
+
+## TASK
+
+Extract cognitive chunks from the new text segment based on the guidance above. You need to extract BOTH types of chunks.
+
+Aim for 3-6 chunks total per segment, balancing between the two types.
 
 **Requirements:**
 1. Each chunk should be:
