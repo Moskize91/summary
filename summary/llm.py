@@ -175,7 +175,7 @@ class LLM:
         temperature = temperature if temperature is not None else self.temperature
         top_p = top_p if top_p is not None else self.top_p
 
-        # Check cache first
+        # Compute cache key
         cache_key = None
         if self._cache_dir_path is not None:
             cache_key = self._compute_cache_key(
@@ -184,24 +184,29 @@ class LLM:
                 temperature,
                 top_p,
             )
-            cache_file = self._cache_dir_path / f"{cache_key}.txt"
-            if cache_file.exists():
-                cached_response = cache_file.read_text(encoding="utf-8")
-                print(f"[Cache Hit] Using cached response (key: {cache_key[:12]}...)")
-                return cached_response
 
+        # Create logger and log request
         logger = self._create_logger()
-        response: str = ""
-        last_error: Exception | None = None
-        did_success = False
-
-        # Log request parameters and messages
         if logger is not None:
             log_params = f"[[Parameters]]:\n\ttemperature={temperature}\n\ttop_p={top_p}\n"
             if cache_key is not None:
                 log_params += f"\tcache_key={cache_key}\n"
             logger.debug(log_params)
             logger.debug("[[Request]]:\n%s\n", self._format_messages(system_prompt, user_message))
+
+        # Check cache after logging
+        if cache_key is not None and self._cache_dir_path is not None:
+            cache_file = self._cache_dir_path / f"{cache_key}.txt"
+            if cache_file.exists():
+                cached_response = cache_file.read_text(encoding="utf-8")
+                print(f"[Cache Hit] Using cached response (key: {cache_key[:12]}...)")
+                if logger is not None:
+                    logger.debug("[[Response]] (from cache):\n%s\n", cached_response)
+                return cached_response
+
+        response: str = ""
+        last_error: Exception | None = None
+        did_success = False
 
         try:
             for i in range(self.retry_times + 1):

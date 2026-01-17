@@ -122,7 +122,7 @@ def main(args: list[str] | None = None) -> int:
         return 1
 
     # Setup log directory
-    log_dir = parsed_args.log
+    log_dir = parsed_args.log if parsed_args.log is not None else Path("logs")
 
     # Setup cache directory
     cache_dir = parsed_args.cache
@@ -137,7 +137,7 @@ def main(args: list[str] | None = None) -> int:
     llm = LLM(
         config_path=parsed_args.config,
         data_dir_path=data_dir,
-        log_dir_path=log_dir,
+        log_dir_path=log_dir / "llm" if log_dir is not None else None,
         cache_dir_path=cache_dir,
     )
 
@@ -172,6 +172,7 @@ def main(args: list[str] | None = None) -> int:
             compression_ratio=0.2,
             quality_threshold=7.0,
             max_iterations=3,
+            log_dir_path=log_dir / "compression" if log_dir is not None else None,
         )
 
         # Save compressed text

@@ -1,11 +1,29 @@
 """Text compression with multi-reviewer iterative refinement."""
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from ..llm import LLM
 from ..topologization.api import ChunkType, Topologization
+
+
+def _extract_json_from_markdown(text: str) -> str:
+    """Extract JSON from markdown code blocks.
+
+    Args:
+        text: Text that may contain markdown code blocks
+
+    Returns:
+        Extracted JSON string (or original text if no code block found)
+    """
+    # Try to extract JSON from markdown code block
+    match = re.search(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
 
 @dataclass
@@ -14,6 +32,7 @@ class SnakeReviewerInfo:
 
     snake_id: int
     weight: float
+    label: str  # Simple label like "first_label → last_label"
     reviewer_info: str  # Natural language review guidelines
 
 
@@ -35,6 +54,7 @@ def compress_text(
     compression_ratio: float = 0.2,
     quality_threshold: float = 7.0,
     max_iterations: int = 3,
+    log_dir_path: Path | None = None,
 ) -> str:
     """Compress text from topologization using iterative refinement.
 
@@ -45,6 +65,7 @@ def compress_text(
         compression_ratio: Target compression ratio (default: 0.2 = 20%)
         quality_threshold: Minimum quality score to accept (default: 7.0)
         max_iterations: Maximum refinement iterations (default: 3)
+        log_dir_path: Directory for compression logs (default: None, no logging)
 
     Returns:
         Compressed text string
@@ -52,6 +73,20 @@ def compress_text(
     print("\n" + "=" * 60)
     print("=== Text Compression Pipeline ===")
     print("=" * 60)
+
+    # Setup logging
+    log_file = None
+    if log_dir_path is not None:
+        log_dir_path.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        log_file = log_dir_path / f"compression {timestamp}.log"
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write(f"=== Text Compression Log ===\n")
+            f.write(f"Started at: {timestamp}\n")
+            f.write(f"Compression ratio target: {compression_ratio:.0%}\n")
+            f.write(f"Quality threshold: {quality_threshold:.1f}/10\n")
+            f.write(f"Max iterations: {max_iterations}\n")
+            f.write("\n\n")
 
     # Step 1: Get original text
     print("\nStep 1: Loading original text...")
@@ -88,6 +123,17 @@ def compress_text(
         )
         print(f"Compressed to {len(compressed_text)} characters")
 
+        # Log compressed text
+        if log_file is not None:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n{'=' * 80}\n")
+                f.write(f"ITERATION {iteration}/{max_iterations}\n")
+                f.write(f"{'=' * 80}\n\n")
+                f.write(f"Compressed text ({len(compressed_text)} characters):\n")
+                f.write(f"{'-' * 80}\n")
+                f.write(compressed_text)
+                f.write(f"\n{'-' * 80}\n\n\n")
+
         # 4.2 Review with all reviewers
         print("Reviewing compressed text...")
         reviews = _review_compression(
@@ -100,6 +146,62 @@ def compress_text(
         # 4.3 Calculate quality
         quality = _calculate_quality(reviews)
         print(f"Quality score: {quality:.2f}/10")
+
+        # Log review results
+        if log_file is not None:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"Review Results:\n")
+                f.write(f"{'-' * 80}\n")
+                f.write(f"Overall Quality Score: {quality:.2f}/10\n\n")
+
+                # Log all snake reviewers (including failed ones)
+                for sr in snake_reviewers:
+                    # Find corresponding review result
+                    review = next((r for r in reviews if r.snake_id == sr.snake_id), None)
+
+                    f.write(f"Snake {sr.snake_id} (weight: {sr.weight:.2f}):\n")
+                    f.write(f"  Label: {sr.label}\n")
+                    f.write(f"  Reviewer: {sr.reviewer_info}\n")
+
+                    if review is None:
+                        f.write(f"  ❌ REVIEW FAILED - No response from LLM or parse error\n")
+                    else:
+                        f.write(f"  User Intent Score: {review.user_intent_score:.1f}/10\n")
+                        f.write(f"  Narrative Flow Score: {review.narrative_flow_score:.1f}/10\n")
+
+                        if review.issues:
+                            f.write(f"  Issues ({len(review.issues)}):\n")
+                            for issue in review.issues:
+                                issue_type = issue.get("type", "unknown")
+                                severity = issue.get("severity", "unknown")
+                                description = issue.get("missing_info") or issue.get("problem", "No description")
+                                suggestion = issue.get("suggestion", "")
+
+                                f.write(f"    - [{severity.upper()}] ({issue_type})\n")
+                                f.write(f"      Problem: {description}\n")
+                                if suggestion:
+                                    f.write(f"      Suggestion: {suggestion}\n")
+                        else:
+                            f.write(f"  No issues reported\n")
+
+                    f.write("\n")
+
+                # Add decision summary
+                f.write(f"{'-' * 80}\n")
+                f.write(f"Decision: ")
+                if quality >= quality_threshold:
+                    f.write(f"✓ SUCCESS - Quality score {quality:.2f} >= threshold {quality_threshold}\n")
+                elif iteration < max_iterations:
+                    f.write(
+                        f"⟳ CONTINUE - Quality score {quality:.2f} < threshold {quality_threshold}, "
+                        f"proceeding to iteration {iteration + 1}/{max_iterations}\n"
+                    )
+                else:
+                    f.write(
+                        f"⚠ ACCEPT - Quality score {quality:.2f} < threshold {quality_threshold}, "
+                        f"but max iterations reached ({max_iterations}/{max_iterations}), using current version\n"
+                    )
+                f.write(f"{'-' * 80}\n\n\n")
 
         # 4.4 Check if quality is acceptable
         if quality >= quality_threshold:
@@ -188,16 +290,25 @@ def _generate_snake_reviewers(
         )
 
         if not weight_response:
-            print("    Warning: Failed to generate weight, using default 0.5")
-            weight = 0.5
-        else:
-            try:
-                weight_data = json.loads(weight_response)
-                weight = float(weight_data.get("weight", 0.5))
-                print(f"    Weight: {weight:.2f}")
-            except (json.JSONDecodeError, ValueError) as e:
-                print(f"    Warning: Failed to parse weight ({e}), using default 0.5")
-                weight = 0.5
+            raise RuntimeError(
+                f"Snake {snake.snake_id} weight generation failed: LLM returned empty response"
+            )
+
+        try:
+            weight_json = _extract_json_from_markdown(weight_response)
+            weight_data = json.loads(weight_json)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"Snake {snake.snake_id} weight generation failed: JSON parse error - {e}"
+            ) from e
+
+        try:
+            weight = float(weight_data.get("weight", 0.5))
+            print(f"    Weight: {weight:.2f}")
+        except (ValueError, KeyError) as e:
+            raise RuntimeError(
+                f"Snake {snake.snake_id} weight generation failed: Invalid data format - {e}"
+            ) from e
 
         # Generate reviewer info
         info_system_prompt = llm.load_system_prompt(info_prompt_path)
@@ -208,16 +319,21 @@ def _generate_snake_reviewers(
         )
 
         if not info_response:
-            print("    Warning: Failed to generate reviewer info")
-            reviewer_info = f"Thread {snake.snake_id}: {snake.first_label} → {snake.last_label}"
-        else:
-            reviewer_info = info_response.strip()
-            print(f"    Reviewer info generated ({len(reviewer_info)} chars)")
+            raise RuntimeError(
+                f"Snake {snake.snake_id} reviewer info generation failed: LLM returned empty response"
+            )
+
+        reviewer_info = info_response.strip()
+        print(f"    Reviewer info generated ({len(reviewer_info)} chars)")
+
+        # Generate simple label
+        label = f"{snake.first_label} → {snake.last_label}"
 
         snake_reviewers.append(
             SnakeReviewerInfo(
                 snake_id=snake.snake_id,
                 weight=weight,
+                label=label,
                 reviewer_info=reviewer_info,
             )
         )
@@ -348,11 +464,15 @@ def _review_compression(
         )
 
         if not response:
-            print(f"  Warning: Snake {sr.snake_id} review failed")
-            continue
+            raise RuntimeError(f"Snake {sr.snake_id} review failed: LLM returned empty response")
 
         try:
-            review_data = json.loads(response)
+            review_json = _extract_json_from_markdown(response)
+            review_data = json.loads(review_json)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Snake {sr.snake_id} review failed: JSON parse error - {e}") from e
+
+        try:
             reviews.append(
                 ReviewResult(
                     snake_id=sr.snake_id,
@@ -367,8 +487,8 @@ def _review_compression(
                 f"intent={review_data.get('user_intent_score', 5.0):.1f}, "
                 f"flow={review_data.get('narrative_flow_score', 5.0):.1f}"
             )
-        except (json.JSONDecodeError, ValueError) as e:
-            print(f"  Warning: Snake {sr.snake_id} review parse failed: {e}")
+        except (ValueError, KeyError) as e:
+            raise RuntimeError(f"Snake {sr.snake_id} review failed: Invalid data format - {e}") from e
 
     return reviews
 
