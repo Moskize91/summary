@@ -654,6 +654,18 @@ files = [
 ]
 
 [[package]]
+name = "json-repair"
+version = "0.55.0"
+description = "A package to repair broken json strings"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "json_repair-0.55.0-py3-none-any.whl", hash = "sha256:bcf4880f5e6ad21a0f70ab034e3d1d398c2ae9698dc5717d7015afbac77b8ed7"},
+    {file = "json_repair-0.55.0.tar.gz", hash = "sha256:9fafb47d92582ef4bdd3520656bdb0fcb37b46cf6aa99c1926b7895abc0a3a4b"},
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 description = "Safely add untrusted strings to HTML/XML markup."
@@ -2200,4 +2212,4 @@ dev = ["pytest", "setuptools"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "b18a15b947c822d4162dba3ecd43019ac7dc961bd4f880c751e67295e800e4a9"
+content-hash = "f375756d684695c20aa3deebbb942123ab050d927b29c82983b45cdd948321ee"

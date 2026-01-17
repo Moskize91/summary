@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from json_repair import repair_json
+
 from ..llm import LLM
 from ..topologization.api import ChunkType, Topologization
 
@@ -87,7 +89,7 @@ def compress_text(
         timestamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
         log_file = log_dir_path / f"compression {timestamp}.log"
         with open(log_file, "w", encoding="utf-8") as f:
-            f.write(f"=== Text Compression Log ===\n")
+            f.write("=== Text Compression Log ===\n")
             f.write(f"Started at: {timestamp}\n")
             f.write(f"Compression ratio target: {compression_ratio:.0%}\n")
             f.write(f"Max iterations: {max_iterations}\n")
@@ -175,7 +177,7 @@ def compress_text(
         # Log review results
         if log_file is not None:
             with open(log_file, "a", encoding="utf-8") as f:
-                f.write(f"Review Results:\n")
+                f.write("Review Results:\n")
                 f.write(f"{'-' * 80}\n")
                 f.write(f"Issue Score: {score:.2f} (lower is better)\n\n")
 
@@ -186,13 +188,13 @@ def compress_text(
 
                     f.write(f"Snake {sr.snake_id} (weight: {sr.weight:.2f}):\n")
                     f.write(f"  Label: {sr.label}\n")
-                    f.write(f"  Reviewer: {sr.reviewer_info}\n")
+                    f.write(f"  Reviewer:\n{sr.reviewer_info}\n")
 
                     if review is None:
-                        f.write(f"  ❌ REVIEW FAILED - No response from LLM or parse error\n")
+                        f.write("  ❌ REVIEW FAILED - No response from LLM or parse error\n")
                     else:
                         if review.issues:
-                            f.write(f"  Issues ({len(review.issues)}):\n")
+                            f.write(f"\n[[ Issues ({len(review.issues)}) ]]\n")
                             for issue in review.issues:
                                 issue_type = issue.get("type", "unknown")
                                 severity = issue.get("severity", "unknown")
@@ -204,7 +206,7 @@ def compress_text(
                                 if suggestion:
                                     f.write(f"      Suggestion: {suggestion}\n")
                         else:
-                            f.write(f"  No issues reported\n")
+                            f.write("  No issues reported\n")
 
                     f.write("\n")
 
@@ -212,11 +214,10 @@ def compress_text(
                 f.write(f"{'-' * 80}\n")
                 f.write("Decision: ")
                 if score == 0:
-                    f.write(f"✓ PERFECT - No issues found, compression successful\n")
+                    f.write("✓ PERFECT - No issues found, compression successful\n")
                 elif iteration < max_iterations:
                     f.write(
-                        f"⟳ CONTINUE - Score {score:.2f}, "
-                        f"proceeding to iteration {iteration + 1}/{max_iterations}\n"
+                        f"⟳ CONTINUE - Score {score:.2f}, proceeding to iteration {iteration + 1}/{max_iterations}\n"
                     )
                 else:
                     f.write("⏹ FINAL - This is the last iteration\n")
@@ -244,7 +245,7 @@ def compress_text(
     if log_file is not None:
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(f"\n{'=' * 80}\n")
-            f.write(f"FINAL SELECTION\n")
+            f.write("FINAL SELECTION\n")
             f.write(f"{'=' * 80}\n\n")
             f.write(f"Selected: Iteration {best_version.iteration}/{max_iterations}\n")
             f.write(f"Score: {best_version.score:.2f}\n")
@@ -324,25 +325,19 @@ def _generate_snake_reviewers(
         )
 
         if not weight_response:
-            raise RuntimeError(
-                f"Snake {snake.snake_id} weight generation failed: LLM returned empty response"
-            )
+            raise RuntimeError(f"Snake {snake.snake_id} weight generation failed: LLM returned empty response")
 
         try:
             weight_json = _extract_json_from_markdown(weight_response)
-            weight_data = json.loads(weight_json)
+            weight_data = json.loads(repair_json(weight_json))
         except json.JSONDecodeError as e:
-            raise RuntimeError(
-                f"Snake {snake.snake_id} weight generation failed: JSON parse error - {e}"
-            ) from e
+            raise RuntimeError(f"Snake {snake.snake_id} weight generation failed: JSON parse error - {e}") from e
 
         try:
             weight = float(weight_data.get("weight", 0.5))
             print(f"    Weight: {weight:.2f}")
         except (ValueError, KeyError) as e:
-            raise RuntimeError(
-                f"Snake {snake.snake_id} weight generation failed: Invalid data format - {e}"
-            ) from e
+            raise RuntimeError(f"Snake {snake.snake_id} weight generation failed: Invalid data format - {e}") from e
 
         # Generate reviewer info
         info_system_prompt = llm.load_system_prompt(info_prompt_path)
@@ -353,9 +348,7 @@ def _generate_snake_reviewers(
         )
 
         if not info_response:
-            raise RuntimeError(
-                f"Snake {snake.snake_id} reviewer info generation failed: LLM returned empty response"
-            )
+            raise RuntimeError(f"Snake {snake.snake_id} reviewer info generation failed: LLM returned empty response")
 
         reviewer_info = info_response.strip()
         print(f"    Reviewer info generated ({len(reviewer_info)} chars)")
@@ -517,7 +510,7 @@ def _review_compression(
 
         try:
             review_json = _extract_json_from_markdown(response)
-            review_data = json.loads(review_json)
+            review_data = json.loads(repair_json(review_json))
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Snake {sr.snake_id} review failed: JSON parse error - {e}") from e
 
