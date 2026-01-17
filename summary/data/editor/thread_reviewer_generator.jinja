@@ -20,7 +20,13 @@ Your job is to:
 - DO NOT add facts from your general knowledge, even if they are historically accurate or contextually relevant
 - When in doubt whether something appears in the source, DO NOT include it
 
-This is a checklist, not a summary. The downstream reviewer will check: "Is this information present in the compressed text?"
+This is a checklist, not a summary. The downstream reviewer will check: "Is this CORE FACT present in the compressed text, regardless of exact wording?"
+
+**CRITICAL: Generate abstract core facts, not specific phrasings:**
+- ✅ GOOD: "Religious figures enjoyed secular privileges (property ownership, marriage rights, commercial activities)"
+- ❌ BAD: "Monks could own their own land, get married, and the wealthy ones could even open pawn shops" (too specific, will cause false positives when wording changes)
+
+The downstream reviewer will perform SEMANTIC VERIFICATION. Your checklist items should describe WHAT facts must be present, not HOW they should be worded.
 
 ---
 
@@ -31,27 +37,36 @@ Structure your output EXACTLY as follows:
 ## Thread: "【Give a concise theme name, 3-8 characters】"
 
 **Critical information (stated in source):**
-- [user_focused/book_coherence] 【Specific fact/event/relationship from the source sentences】
-- [user_focused/book_coherence] 【Another critical point from the source】
+- [user_focused/book_coherence] 【Core fact/event/relationship - describe abstractly, focus on the MEANING not exact words】
+- [user_focused/book_coherence] 【Another critical fact - what MUST be conveyed, regardless of how it's phrased】
 
 **Important information (stated in source):**
-- [user_focused/book_coherence] 【Significant detail from the source sentences】
-- [user_focused/book_coherence] 【Another important point from the source】
+- [user_focused/book_coherence] 【Significant fact - describe the essence, not the specific wording】
+- [user_focused/book_coherence] 【Another important fact】
 
 **Supporting information (stated in source):**
-- [user_focused/book_coherence] 【Contextual detail from the source sentences】
+- [user_focused/book_coherence] 【Contextual fact - the core meaning that should be present】
 
 ---
 
 **Guidelines:**
 - **Thread naming:** Name reflects what source sentences actually discuss, regardless of user intent
   - Example: User wants "economic policies" but source discusses "birth omens" → Name it "Birth Omens" not "Economic Policies"
-- List what is actually stated in the source sentences - include specific names, numbers, policies, events as they appear in the text
+- **Checklist style - ABSTRACT CORE FACTS:**
+  - Describe WHAT information must be conveyed (the fact itself)
+  - Do NOT quote or copy exact phrasings from source
+  - Think: "What is the essential meaning here that must survive compression?"
+  - Include specific names, numbers, dates, policies - but phrase them as facts to verify, not sentences to match
 - Prioritize user_focused information - it's what the reader explicitly wants
 - **Importance categorization:**
   - "Critical" = loss would violate user intent (if aligned) OR break narrative logic
   - "Important" = significant information that enriches understanding
   - "Supporting" = contextual details that help but aren't essential
   - If thread content is unrelated to user intent, most information may fall into "supporting" category - that's fine
-- Focus on WHAT information is stated in the source, not HOW to write it
 - If a detail doesn't appear in the source sentences, DO NOT include it - no matter how relevant it seems
+
+**Examples of good vs. bad checklist items:**
+- ✅ GOOD: "Multiple family members died in rapid succession (specific dates/order mentioned)"
+- ❌ BAD: "On June 6th the father died, on June 9th the eldest brother died, on June 12th the nephew died, on June 22nd the mother died"
+- ✅ GOOD: "A landlord refused to provide burial land, showing cold indifference"
+- ❌ BAD: "The landlord flatly refused the request, saying 'your parents' death is none of my business, I fed them because they worked for me'"
