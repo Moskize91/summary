@@ -28,6 +28,68 @@ def _extract_json_from_markdown(text: str) -> str:
     return text.strip()
 
 
+def _extract_compressed_text(full_response: str) -> str:
+    """Extract the actual compressed text from AI's structured response.
+
+    The AI may output in this format:
+    ## Working Notes (internal)
+    [thoughts...]
+    ---
+    ## Compressed Text (or 压缩文本)
+    [actual compressed text]
+    ---
+    [additional notes...]
+
+    Args:
+        full_response: Full response from AI
+
+    Returns:
+        Extracted compressed text only
+    """
+    # Try to find "## Compressed Text" or "## 压缩文本" section
+    # Support both English and Chinese headings
+    match = re.search(
+        r"##\s*(?:Compressed\s+Text|压缩文本)\s*\n+(.*?)(?:\n+---|\*\*CRITICAL\*\*|$)",
+        full_response,
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    if match:
+        compressed_text = match.group(1).strip()
+        # Remove any 【】 brackets if present at start/end
+        compressed_text = re.sub(r"^【|】$", "", compressed_text).strip()
+        return compressed_text
+
+    # Fallback: if no section marker found, return the full response
+    # (for backward compatibility with old format)
+    return full_response.strip()
+
+
+def _extract_thinking_text(full_response: str) -> str:
+    """Extract thinking/working notes from AI response, excluding the compressed text section.
+
+    Args:
+        full_response: Full response from AI
+
+    Returns:
+        Thinking text only (everything before the compressed text section)
+    """
+    # Find the compressed text section
+    match = re.search(
+        r"##\s*(?:Compressed\s+Text|压缩文本)\s*",
+        full_response,
+        re.IGNORECASE,
+    )
+
+    if match:
+        # Get everything before the compressed text section
+        thinking = full_response[: match.start()].strip()
+        return thinking
+
+    # If no section found, return empty (backward compatibility)
+    return ""
+
+
 @dataclass
 class SnakeReviewerInfo:
     """Information about a snake for reviewing compressed text."""
@@ -120,7 +182,7 @@ def compress_text(
 
         # 4.1 Compress text
         print("Compressing text...")
-        compressed_text = _compress_iteration(
+        full_response, compressed_text = _compress_iteration(
             original_text=original_text,
             target_length=target_length,
             compression_ratio=compression_ratio,
@@ -146,7 +208,16 @@ def compress_text(
                     f.write(revision_feedback)
                     f.write(f"\n{'-' * 80}\n\n")
 
-                f.write(f"Compressed text ({len(compressed_text)} characters):\n")
+                # Log thinking text (excluding compressed text section)
+                thinking_text = _extract_thinking_text(full_response)
+                if thinking_text and thinking_text.strip():
+                    f.write("Thinking:\n")
+                    f.write(f"{'-' * 80}\n")
+                    f.write(thinking_text)
+                    f.write(f"\n{'-' * 80}\n\n")
+
+                # Log extracted compressed text with character count
+                f.write(f"Extracted Compressed Text ({len(compressed_text)} characters):\n")
                 f.write(f"{'-' * 80}\n")
                 f.write(compressed_text)
                 f.write(f"\n{'-' * 80}\n\n\n")
@@ -412,7 +483,7 @@ def _compress_iteration(
     revision_feedback: str | None,
     intention: str,
     llm: LLM,
-) -> str:
+) -> tuple[str, str]:
     """Perform one compression iteration.
 
     Args:
@@ -426,7 +497,9 @@ def _compress_iteration(
         llm: LLM instance
 
     Returns:
-        Compressed text string
+        Tuple of (full_response, compressed_text):
+        - full_response: Complete AI response including Working Notes
+        - compressed_text: Extracted compressed text only
     """
     # Format thread summaries
     thread_summaries = "\n\n".join(
@@ -469,7 +542,10 @@ def _compress_iteration(
     if not response:
         raise RuntimeError("Compression failed: LLM returned empty response")
 
-    return response.strip()
+    full_response = response.strip()
+    compressed_text = _extract_compressed_text(full_response)
+
+    return full_response, compressed_text
 
 
 def _review_compression(
