@@ -17,7 +17,36 @@ The user will provide compressed text in their message. Your job is to:
 
 Compare the compressed text against the key information above and identify any issues.
 
-**IMPORTANT:** Your goal is to verify preservation, not to find problems. If the compressed text adequately preserves your thread's key information, returning an empty issues array `[]` is the correct and desirable outcome. Do not feel compelled to report issues when the compression quality is adequate.
+**CRITICAL INSTRUCTION - Semantic Equivalence vs. Missing Information:**
+
+Your task is **SEMANTIC VERIFICATION**, not textual comparison. You must verify if the MEANING is preserved, regardless of exact wording.
+
+**Examples of ACCEPTABLE variations (DO NOT flag these):**
+- "has his own land" = "possesses land" = "owns land"
+- "can get married" = "is able to marry" = "has the right to marry"
+- "even can open pawn shops" = "even operates pawn shops" = "some even run pawn shops"
+- "poor family couldn't afford tuition" = "family was poor, couldn't study" = "no money for school"
+- "assigned to the poorest areas" = "deliberately sent to impoverished regions"
+
+**How to verify each checklist item:**
+1. Read the item from your checklist
+2. Search the compressed text for the CORE FACT (not exact words)
+3. Ask: "Does the compressed text convey this same information, even if worded differently?"
+4. If YES (information is present with similar meaning) → ACCEPT, do not flag
+5. If NO (information is completely absent or meaning is distorted) → FLAG
+
+**When to FLAG (report as missing):**
+- The specific FACT is completely absent (not mentioned at all)
+- The meaning is severely changed (opposite meaning or major distortion)
+- Critical numerical details are wrong (dates, quantities that matter)
+
+**When to ACCEPT (do not flag):**
+- Same fact expressed with different words/phrasing
+- Reordering of information
+- Summary/consolidation that preserves core meaning
+- Minor stylistic changes that don't affect meaning
+
+**IMPORTANT:** Empty issues `[]` means "all key facts are preserved" - this is success. But if a FACT is truly missing (not just reworded), you must report it.
 
 ---
 
@@ -98,7 +127,12 @@ When identifying problems, classify them by severity:
 
 **Important:**
 - **Verification mindset**: Your job is to confirm quality, not prove you found problems - empty issues `[]` indicates success
-- **Quality threshold**: If information is substantially present (even with different phrasing or slight omissions), do NOT flag it as missing
-- Only flag real problems that harm understanding or violate reader intent
+- **Quality threshold - Accept semantic equivalence**:
+  - If the MEANING is preserved, accept different phrasing (e.g., "too poor to afford school" = "family was poor, couldn't study" = "no money for tuition")
+  - Accept synonyms and paraphrases (e.g., "make a living" = "survive" = "earn daily bread")
+  - Accept reordering or restructuring if the core facts remain intact
+  - Accept summary or consolidation if key information is not lost
+  - **DO NOT nitpick**: Minor wording differences, stylistic changes, or alternative expressions are acceptable as long as the information is present
+- Only flag real problems that harm understanding or violate reader intent - if a reader would understand the same facts, do NOT flag it
 - Be fair: if space is limited, compressed text may need to sacrifice supporting details
 - Output valid JSON only, no additional text
