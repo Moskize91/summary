@@ -6,6 +6,7 @@ from pathlib import Path
 
 from tiktoken import get_encoding
 
+from .editor import compress_text
 from .llm import LLM
 from .topologization import TopologizationConfig, topologize
 
@@ -151,23 +152,40 @@ def main(args: list[str] | None = None) -> int:
     )
 
     try:
+        intention = "帮我压缩这本书，其中元朝的政策和元朝治下的百姓生存环境是重点，要尽可能保留，其他可以省略。"
+
         # Run topologization
-        _ = topologize(
-            intention="帮我压缩这本书，其中元朝的政策和元朝治下的百姓生存环境是重点，要尽可能保留，其他可以省略。",
+        topologization = topologize(
+            intention=intention,
             input_file=parsed_args.input_file,
             workspace_path=parsed_args.workspace,
             config=config,
             llm=llm,
             encoding=get_encoding("o200k_base"),
         )
+
+        # Run compression
+        compressed_text = compress_text(
+            topologization=topologization,
+            intention=intention,
+            llm=llm,
+            compression_ratio=0.2,
+            quality_threshold=7.0,
+            max_iterations=3,
+        )
+
+        # Save compressed text
+        output_path = parsed_args.workspace / "compressed.txt"
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(compressed_text)
+
         # Print summary
-        print("\nWorkspace created successfully!")
-        print(f"Workspace path: {parsed_args.workspace}")
-        print("\nYou can now access the results programmatically:")
-        print("  from summary.topologization import Topologization")
-        print(f"  topo = Topologization(Path('{parsed_args.workspace}'))")
-        print("  for chunk in topo.knowledge_graph:")
-        print("      print(chunk.label, chunk.content)")
+        print("\n" + "=" * 60)
+        print("=== Pipeline Complete ===")
+        print("=" * 60)
+        print(f"Workspace: {parsed_args.workspace}")
+        print(f"Compressed text saved to: {output_path}")
+        print(f"Compressed text length: {len(compressed_text)} characters")
 
         return 0
 
