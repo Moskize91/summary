@@ -532,7 +532,8 @@ def _compress_iteration(
     )
 
     # Build messages based on iteration
-    user_message = f"{intention}\n\n---\n\n{original_text}"
+    # User message contains only the original text, no intention
+    user_message = original_text
 
     if previous_compressed_text is None or revision_feedback is None:
         # First iteration: simple request
@@ -594,30 +595,28 @@ def _review_compression(
             thread_info=sr.reviewer_info,
         )
 
-        user_message = f"{intention}\n\n---\n\n{compressed_text}"
-
         # Check if this reviewer has history
         has_history = reviewer_histories is not None and sr.snake_id in reviewer_histories
 
         if has_history:
             prev_compressed_text, prev_response = reviewer_histories[sr.snake_id]
             # Build conversation history: system + user(prev) + assistant(prev) + user(current)
-            prev_user_message = f"{intention}\n\n---\n\n{prev_compressed_text}"
+            # All user messages contain only compressed text, no intention
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prev_user_message},
+                {"role": "user", "content": prev_compressed_text},
                 {"role": "assistant", "content": prev_response},
-                {"role": "user", "content": user_message},
+                {"role": "user", "content": compressed_text},
             ]
             response = llm.request_with_history(
                 messages=messages,
                 temperature=0.3,
             )
         else:
-            # First iteration: simple request
+            # First iteration: simple request with only compressed text
             response = llm.request(
                 system_prompt=system_prompt,
-                user_message=user_message,
+                user_message=compressed_text,
                 temperature=0.3,
             )
 

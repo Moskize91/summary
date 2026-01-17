@@ -32,7 +32,7 @@ if __name__ == "__main__":
         "--cache",
         str(cache_dir),
         "--max-chunks",
-        "5",
+        "10",
     ]
 
     # Run CLI
