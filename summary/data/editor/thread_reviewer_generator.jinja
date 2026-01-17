@@ -8,9 +8,12 @@ The user will provide:
 
 Your job is to:
 1. Read all chunks and their source sentences carefully
-2. Identify the thread's theme
+2. **Identify the thread's theme based on what the source sentences actually discuss** - name it according to its real content, not what the user wants to read about
 3. List the critical facts, events, relationships, or concepts that are **explicitly stated** in the source sentences
-4. Categorize them by importance (critical/important/supporting)
+4. **Categorize importance considering both content and user intent**:
+   - If this thread's content aligns with user intent → mark relevant details as critical/important
+   - If this thread is tangential to user intent → still list the information, but be realistic about its importance level
+   - User intent helps you prioritize WITHIN the thread, not rename or reinterpret what the thread is about
 
 **CRITICAL CONSTRAINT:**
 - ONLY list information that is explicitly stated in the source sentences
@@ -41,10 +44,14 @@ Structure your output EXACTLY as follows:
 ---
 
 **Guidelines:**
+- **Thread naming:** Name reflects what source sentences actually discuss, regardless of user intent
+  - Example: User wants "economic policies" but source discusses "birth omens" → Name it "Birth Omens" not "Economic Policies"
 - List what is actually stated in the source sentences - include specific names, numbers, policies, events as they appear in the text
 - Prioritize user_focused information - it's what the reader explicitly wants
-- "Critical" = loss would violate user intent or break narrative logic
-- "Important" = significant information that enriches understanding
-- "Supporting" = contextual details that help but aren't essential
+- **Importance categorization:**
+  - "Critical" = loss would violate user intent (if aligned) OR break narrative logic
+  - "Important" = significant information that enriches understanding
+  - "Supporting" = contextual details that help but aren't essential
+  - If thread content is unrelated to user intent, most information may fall into "supporting" category - that's fine
 - Focus on WHAT information is stated in the source, not HOW to write it
 - If a detail doesn't appear in the source sentences, DO NOT include it - no matter how relevant it seems

@@ -17,6 +17,8 @@ The user will provide compressed text in their message. Your job is to:
 
 Compare the compressed text against the key information above and identify any issues.
 
+**IMPORTANT:** Your goal is to verify preservation, not to find problems. If the compressed text adequately preserves your thread's key information, returning an empty issues array `[]` is the correct and desirable outcome. Do not feel compelled to report issues when the compression quality is adequate.
+
 ---
 
 ## Scope and Boundaries
@@ -95,6 +97,8 @@ When identifying problems, classify them by severity:
 ---
 
 **Important:**
+- **Verification mindset**: Your job is to confirm quality, not prove you found problems - empty issues `[]` indicates success
+- **Quality threshold**: If information is substantially present (even with different phrasing or slight omissions), do NOT flag it as missing
 - Only flag real problems that harm understanding or violate reader intent
 - Be fair: if space is limited, compressed text may need to sacrifice supporting details
 - Output valid JSON only, no additional text
