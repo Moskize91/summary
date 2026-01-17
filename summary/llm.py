@@ -259,6 +259,121 @@ class LLM:
 
         return response
 
+    def request_with_history(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        top_p: float | None = None,
+    ) -> str | None:
+        """Send a request to the LLM with conversation history.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content' keys
+                     Example: [
+                         {"role": "system", "content": "..."},
+                         {"role": "user", "content": "..."},
+                         {"role": "assistant", "content": "..."},
+                         {"role": "user", "content": "..."}
+                     ]
+            temperature: Temperature parameter (uses config default if None)
+            top_p: Top-p parameter (uses config default if None)
+
+        Returns:
+            LLM response text, or None if request failed
+        """
+        temperature = temperature if temperature is not None else self.temperature
+        top_p = top_p if top_p is not None else self.top_p
+
+        # Compute cache key from messages
+        cache_key = None
+        if self._cache_dir_path is not None:
+            cache_data = {
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": top_p,
+                "model": self.model,
+            }
+            cache_json = json.dumps(cache_data, ensure_ascii=False, sort_keys=True)
+            cache_key = hashlib.sha512(cache_json.encode("utf-8")).hexdigest()
+
+        # Create logger and log request
+        logger = self._create_logger()
+        if logger is not None:
+            log_params = f"[[Parameters]]:\n\ttemperature={temperature}\n\ttop_p={top_p}\n"
+            if cache_key is not None:
+                log_params += f"\tcache_key={cache_key}\n"
+            logger.debug(log_params)
+
+            # Log messages
+            buffer = StringIO()
+            for msg in messages:
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                buffer.write(f"{role.capitalize()}:\n{content}\n\n")
+            logger.debug("[[Request]]:\n%s", buffer.getvalue())
+
+        # Check cache after logging
+        if cache_key is not None and self._cache_dir_path is not None:
+            cache_file = self._cache_dir_path / f"{cache_key}.txt"
+            if cache_file.exists():
+                cached_response = cache_file.read_text(encoding="utf-8")
+                print(f"[Cache Hit] Using cached response (key: {cache_key[:12]}...)")
+                if logger is not None:
+                    logger.debug("[[Response]] (from cache):\n%s\n", cached_response)
+                return cached_response
+
+        response: str = ""
+        last_error: Exception | None = None
+        did_success = False
+
+        try:
+            for i in range(self.retry_times + 1):
+                try:
+                    completion = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=temperature,
+                        top_p=top_p,
+                    )
+                    response = completion.choices[0].message.content or ""
+
+                    if logger is not None:
+                        logger.debug("[[Response]]:\n%s\n", response)
+
+                    did_success = True
+                    break
+
+                except Exception as err:
+                    last_error = err
+                    if not self._is_retry_error(err):
+                        if logger is not None:
+                            logger.error("[[Error]]:\n%s\n", err)
+                        raise err
+
+                    if logger is not None:
+                        logger.warning("Request failed with connection error, retrying... (%s times)", i + 1)
+
+                    if self.retry_interval_seconds > 0.0 and i < self.retry_times:
+                        sleep(self.retry_interval_seconds)
+                    continue
+
+        except KeyboardInterrupt as err:
+            if last_error is not None and logger is not None:
+                logger.debug("[[Error]]:\n%s\n", last_error)
+            raise err
+
+        if not did_success:
+            if logger is not None and last_error is not None:
+                logger.error("[[Error]]:\n%s\n", last_error)
+            return None
+
+        # Save to cache
+        if self._cache_dir_path is not None and cache_key is not None:
+            cache_file = self._cache_dir_path / f"{cache_key}.txt"
+            cache_file.write_text(response, encoding="utf-8")
+
+        return response
+
     def load_system_prompt(self, prompt_template_path: Path, **kwargs) -> str:
         """Load and render the system prompt from a Jinja template.
 

@@ -42,9 +42,17 @@ class ReviewResult:
 
     snake_id: int
     weight: float
-    user_intent_score: float
-    narrative_flow_score: float
-    issues: list[dict]
+    issues: list[dict]  # List of issue dicts with type, severity, missing_info/problem, suggestion
+
+
+@dataclass
+class CompressionVersion:
+    """A single compression version with its score."""
+
+    iteration: int
+    text: str
+    score: float  # Lower is better
+    reviews: list[ReviewResult]
 
 
 def compress_text(
@@ -52,8 +60,7 @@ def compress_text(
     intention: str,
     llm: LLM,
     compression_ratio: float = 0.2,
-    quality_threshold: float = 7.0,
-    max_iterations: int = 3,
+    max_iterations: int = 5,
     log_dir_path: Path | None = None,
 ) -> str:
     """Compress text from topologization using iterative refinement.
@@ -63,8 +70,7 @@ def compress_text(
         intention: User's reading intention
         llm: LLM instance
         compression_ratio: Target compression ratio (default: 0.2 = 20%)
-        quality_threshold: Minimum quality score to accept (default: 7.0)
-        max_iterations: Maximum refinement iterations (default: 3)
+        max_iterations: Number of iterations (default: 5)
         log_dir_path: Directory for compression logs (default: None, no logging)
 
     Returns:
@@ -84,7 +90,6 @@ def compress_text(
             f.write(f"=== Text Compression Log ===\n")
             f.write(f"Started at: {timestamp}\n")
             f.write(f"Compression ratio target: {compression_ratio:.0%}\n")
-            f.write(f"Quality threshold: {quality_threshold:.1f}/10\n")
             f.write(f"Max iterations: {max_iterations}\n")
             f.write("\n\n")
 
@@ -102,9 +107,10 @@ def compress_text(
     target_length = int(len(original_text) * compression_ratio)
     print(f"Target length: {target_length} characters ({compression_ratio:.0%} compression)")
 
-    # Step 4: Iterative compression
-    print("\nStep 3: Iterative compression...")
-    compressed_text: str = ""
+    # Step 4: Iterative compression - always run max_iterations times
+    print(f"\nStep 3: Iterative compression ({max_iterations} iterations)...")
+    versions: list[CompressionVersion] = []
+    previous_compressed_text: str | None = None
     revision_feedback: str | None = None
 
     for iteration in range(1, max_iterations + 1):
@@ -117,6 +123,7 @@ def compress_text(
             target_length=target_length,
             compression_ratio=compression_ratio,
             snake_reviewers=snake_reviewers,
+            previous_compressed_text=previous_compressed_text,
             revision_feedback=revision_feedback,
             intention=intention,
             llm=llm,
@@ -129,6 +136,14 @@ def compress_text(
                 f.write(f"\n{'=' * 80}\n")
                 f.write(f"ITERATION {iteration}/{max_iterations}\n")
                 f.write(f"{'=' * 80}\n\n")
+
+                # Show revision feedback if present
+                if revision_feedback:
+                    f.write("Revision Feedback (Compressor's View):\n")
+                    f.write(f"{'-' * 80}\n")
+                    f.write(revision_feedback)
+                    f.write(f"\n{'-' * 80}\n\n")
+
                 f.write(f"Compressed text ({len(compressed_text)} characters):\n")
                 f.write(f"{'-' * 80}\n")
                 f.write(compressed_text)
@@ -143,16 +158,26 @@ def compress_text(
             llm=llm,
         )
 
-        # 4.3 Calculate quality
-        quality = _calculate_quality(reviews)
-        print(f"Quality score: {quality:.2f}/10")
+        # 4.3 Calculate score (lower is better)
+        score = _calculate_score(reviews)
+        print(f"Issue score: {score:.2f} (lower is better)")
+
+        # Store this version
+        versions.append(
+            CompressionVersion(
+                iteration=iteration,
+                text=compressed_text,
+                score=score,
+                reviews=reviews,
+            )
+        )
 
         # Log review results
         if log_file is not None:
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"Review Results:\n")
                 f.write(f"{'-' * 80}\n")
-                f.write(f"Overall Quality Score: {quality:.2f}/10\n\n")
+                f.write(f"Issue Score: {score:.2f} (lower is better)\n\n")
 
                 # Log all snake reviewers (including failed ones)
                 for sr in snake_reviewers:
@@ -166,9 +191,6 @@ def compress_text(
                     if review is None:
                         f.write(f"  ❌ REVIEW FAILED - No response from LLM or parse error\n")
                     else:
-                        f.write(f"  User Intent Score: {review.user_intent_score:.1f}/10\n")
-                        f.write(f"  Narrative Flow Score: {review.narrative_flow_score:.1f}/10\n")
-
                         if review.issues:
                             f.write(f"  Issues ({len(review.issues)}):\n")
                             for issue in review.issues:
@@ -188,43 +210,55 @@ def compress_text(
 
                 # Add decision summary
                 f.write(f"{'-' * 80}\n")
-                f.write(f"Decision: ")
-                if quality >= quality_threshold:
-                    f.write(f"✓ SUCCESS - Quality score {quality:.2f} >= threshold {quality_threshold}\n")
+                f.write("Decision: ")
+                if score == 0:
+                    f.write(f"✓ PERFECT - No issues found, compression successful\n")
                 elif iteration < max_iterations:
                     f.write(
-                        f"⟳ CONTINUE - Quality score {quality:.2f} < threshold {quality_threshold}, "
+                        f"⟳ CONTINUE - Score {score:.2f}, "
                         f"proceeding to iteration {iteration + 1}/{max_iterations}\n"
                     )
                 else:
-                    f.write(
-                        f"⚠ ACCEPT - Quality score {quality:.2f} < threshold {quality_threshold}, "
-                        f"but max iterations reached ({max_iterations}/{max_iterations}), using current version\n"
-                    )
+                    f.write("⏹ FINAL - This is the last iteration\n")
                 f.write(f"{'-' * 80}\n\n\n")
 
-        # 4.4 Check if quality is acceptable
-        if quality >= quality_threshold:
-            print(f"✓ Quality threshold reached ({quality:.2f} >= {quality_threshold})")
+        # If score is 0 (perfect), stop early
+        if score == 0:
+            print("✓ Perfect compression achieved (score = 0)")
             break
 
         # 4.5 Collect feedback for next iteration
         if iteration < max_iterations:
-            print("Quality below threshold, preparing revision feedback...")
-            revision_feedback = _collect_feedback(reviews)
-        else:
-            print("Max iterations reached. Using current version.")
+            print("Preparing revision feedback...")
+            revision_feedback = _collect_feedback(reviews, llm)
+            previous_compressed_text = compressed_text
 
-    if not compressed_text:
-        raise RuntimeError("Compression failed: no compressed text generated")
+    # Step 5: Select best version (lowest score)
+    if not versions:
+        raise RuntimeError("Compression failed: no versions generated")
+
+    best_version = min(versions, key=lambda v: v.score)
+    print(f"\n✓ Selected iteration {best_version.iteration} with score {best_version.score:.2f}")
+
+    # Log final selection
+    if log_file is not None:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n{'=' * 80}\n")
+            f.write(f"FINAL SELECTION\n")
+            f.write(f"{'=' * 80}\n\n")
+            f.write(f"Selected: Iteration {best_version.iteration}/{max_iterations}\n")
+            f.write(f"Score: {best_version.score:.2f}\n")
+            f.write(f"Length: {len(best_version.text)} characters\n")
+            f.write(f"Compression ratio: {len(best_version.text) / len(original_text):.1%}\n")
+            f.write(f"\n{'=' * 80}\n\n")
 
     print("\n" + "=" * 60)
     print("=== Compression Complete ===")
     print("=" * 60)
-    print(f"Final length: {len(compressed_text)} characters")
-    print(f"Compression ratio: {len(compressed_text) / len(original_text):.1%}")
+    print(f"Final length: {len(best_version.text)} characters")
+    print(f"Compression ratio: {len(best_version.text) / len(original_text):.1%}")
 
-    return compressed_text
+    return best_version.text
 
 
 def _get_full_text(topologization: Topologization) -> str:
@@ -381,6 +415,7 @@ def _compress_iteration(
     target_length: int,
     compression_ratio: float,
     snake_reviewers: list[SnakeReviewerInfo],
+    previous_compressed_text: str | None,
     revision_feedback: str | None,
     intention: str,
     llm: LLM,
@@ -392,7 +427,8 @@ def _compress_iteration(
         target_length: Target length in characters
         compression_ratio: Compression ratio
         snake_reviewers: List of snake reviewer info
-        revision_feedback: Feedback from previous iteration (if any)
+        previous_compressed_text: Previous iteration's compressed text (None for first iteration)
+        revision_feedback: Feedback from previous iteration (None for first iteration)
         intention: User's reading intention
         llm: LLM instance
 
@@ -404,7 +440,7 @@ def _compress_iteration(
         [f"**Thread {sr.snake_id} (weight: {sr.weight:.2f}):**\n{sr.reviewer_info}" for sr in snake_reviewers]
     )
 
-    # Load prompt template
+    # Load prompt template (no longer includes revision_feedback)
     prompt_path = Path(__file__).parent.parent / "data" / "editor" / "text_compressor.jinja"
     system_prompt = llm.load_system_prompt(
         prompt_path,
@@ -412,16 +448,30 @@ def _compress_iteration(
         target_length=target_length,
         compression_ratio=int(compression_ratio * 100),
         thread_summaries=thread_summaries,
-        revision_feedback=revision_feedback,
     )
 
-    # Call LLM
+    # Build messages based on iteration
     user_message = f"{intention}\n\n---\n\n{original_text}"
-    response = llm.request(
-        system_prompt=system_prompt,
-        user_message=user_message,
-        temperature=0.5,
-    )
+
+    if previous_compressed_text is None or revision_feedback is None:
+        # First iteration: simple request
+        response = llm.request(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            temperature=0.5,
+        )
+    else:
+        # Subsequent iterations: include previous attempt and feedback
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": previous_compressed_text},
+            {"role": "user", "content": revision_feedback},
+        ]
+        response = llm.request_with_history(
+            messages=messages,
+            temperature=0.5,
+        )
 
     if not response:
         raise RuntimeError("Compression failed: LLM returned empty response")
@@ -452,7 +502,6 @@ def _review_compression(
     for sr in snake_reviewers:
         system_prompt = llm.load_system_prompt(
             prompt_path,
-            thread_weight=sr.weight,
             thread_info=sr.reviewer_info,
         )
 
@@ -473,89 +522,108 @@ def _review_compression(
             raise RuntimeError(f"Snake {sr.snake_id} review failed: JSON parse error - {e}") from e
 
         try:
+            issues = review_data.get("issues", [])
             reviews.append(
                 ReviewResult(
                     snake_id=sr.snake_id,
                     weight=sr.weight,
-                    user_intent_score=float(review_data.get("user_intent_score", 5.0)),
-                    narrative_flow_score=float(review_data.get("narrative_flow_score", 5.0)),
-                    issues=review_data.get("issues", []),
+                    issues=issues,
                 )
             )
-            print(
-                f"  Snake {sr.snake_id}: "
-                f"intent={review_data.get('user_intent_score', 5.0):.1f}, "
-                f"flow={review_data.get('narrative_flow_score', 5.0):.1f}"
-            )
+            print(f"  Snake {sr.snake_id}: {len(issues)} issues")
         except (ValueError, KeyError) as e:
             raise RuntimeError(f"Snake {sr.snake_id} review failed: Invalid data format - {e}") from e
 
     return reviews
 
 
-def _calculate_quality(reviews: list[ReviewResult]) -> float:
-    """Calculate weighted quality score from reviews.
+def _calculate_score(reviews: list[ReviewResult]) -> float:
+    """Calculate issue score from reviews (lower is better).
+
+    Score = sum of (severity * weight) for all issues
+    - critical: 9
+    - major: 3
+    - minor: 1
 
     Args:
         reviews: List of ReviewResult objects
 
     Returns:
-        Quality score (0-10)
+        Issue score (0 = perfect, higher = more problems)
     """
-    if not reviews:
-        return 0.0
+    severity_values = {"critical": 9, "major": 3, "minor": 1}
 
-    # Calculate weighted average
-    # Combined score: 70% user intent, 30% narrative flow
     total_score = 0.0
-    total_weight = 0.0
-
     for review in reviews:
-        combined_score = review.user_intent_score * 0.7 + review.narrative_flow_score * 0.3
-        total_score += combined_score * review.weight
-        total_weight += review.weight
+        for issue in review.issues:
+            severity = issue.get("severity", "minor").lower()
+            severity_value = severity_values.get(severity, 1)
+            total_score += severity_value * review.weight
 
-    if total_weight == 0:
-        return 0.0
-
-    return total_score / total_weight
+    return total_score
 
 
-def _collect_feedback(reviews: list[ReviewResult]) -> str:
+def _collect_feedback(reviews: list[ReviewResult], llm: LLM) -> str:
     """Collect feedback from reviews for next iteration.
 
+    Implements blind review: issues are aggregated and sorted by severity/importance,
+    without revealing which snake raised them.
+
     Args:
         reviews: List of ReviewResult objects
+        llm: LLM instance for loading template
 
     Returns:
-        Formatted feedback string
+        Formatted feedback string for compressor
     """
-    feedback_lines = []
+    severity_values = {"critical": 9, "major": 3, "minor": 1}
 
+    # Collect all issues with metadata
+    all_issues = []
     for review in reviews:
-        if not review.issues:
-            continue
+        for raw_index, issue in enumerate(review.issues):
+            severity = issue.get("severity", "minor").lower()
+            severity_value = severity_values.get(severity, 1)
+            all_issues.append(
+                {
+                    "severity": severity,
+                    "severity_value": severity_value,
+                    "weight": review.weight,
+                    "raw_index": raw_index,
+                    "type": issue.get("type", "unknown"),
+                    "description": issue.get("missing_info") or issue.get("problem", "No description"),
+                    "suggestion": issue.get("suggestion", ""),
+                }
+            )
 
-        feedback_lines.append(f"**Thread {review.snake_id} (weight: {review.weight:.2f}):**")
-        feedback_lines.append(
-            f"Scores: User Intent={review.user_intent_score:.1f}/10, "
-            f"Narrative Flow={review.narrative_flow_score:.1f}/10"
-        )
-        feedback_lines.append("")
+    if not all_issues:
+        return "No issues found - all reviewers are satisfied."
 
-        for issue in review.issues:
-            issue_type = issue.get("type", "unknown")
-            severity = issue.get("severity", "unknown")
-            description = issue.get("missing_info") or issue.get("problem", "No description")
-            suggestion = issue.get("suggestion", "")
+    # Sort by (severity_value DESC, weight DESC, raw_index ASC)
+    all_issues.sort(key=lambda x: (-x["severity_value"], -x["weight"], x["raw_index"]))
 
-            feedback_lines.append(f"- [{severity.upper()}] ({issue_type})")
-            feedback_lines.append(f"  Problem: {description}")
-            if suggestion:
-                feedback_lines.append(f"  Suggestion: {suggestion}")
-            feedback_lines.append("")
+    # Format issues description (max 9 issues shown)
+    issues_lines = []
+    visible_count = min(9, len(all_issues))
+    hidden_count = len(all_issues) - visible_count
 
-        feedback_lines.append("---")
-        feedback_lines.append("")
+    for i, issue in enumerate(all_issues[:visible_count], 1):
+        issues_lines.append(f"{i}. [{issue['severity'].upper()}] ({issue['type']})")
+        issues_lines.append(f"   Problem: {issue['description']}")
+        if issue["suggestion"]:
+            issues_lines.append(f"   Suggestion: {issue['suggestion']}")
+        issues_lines.append("")
 
-    return "\n".join(feedback_lines) if feedback_lines else "No specific issues identified."
+    if hidden_count > 0:
+        issues_lines.append(f"... and {hidden_count} more issues hidden (lower priority)")
+
+    issues_description = "\n".join(issues_lines)
+
+    # Load feedback template and render
+    feedback_template_path = Path(__file__).parent.parent / "data" / "editor" / "revision_feedback.jinja"
+    feedback_message = llm.load_system_prompt(
+        feedback_template_path,
+        issues_description=issues_description,
+    )
+
+    return feedback_message

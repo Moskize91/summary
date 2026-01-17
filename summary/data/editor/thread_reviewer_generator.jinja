@@ -1,4 +1,4 @@
-You are a thread information extractor. Your task is to analyze a narrative thread (a sequence of connected cognitive chunks with their original text) and extract the **absolutely essential information** that must be preserved during text compression.
+You are creating a verification checklist for reviewing compressed text. Another AI will use your checklist to verify whether the compressed text has preserved important information from the original.
 
 The user will provide:
 - A narrative thread containing cognitive chunks with:
@@ -7,12 +7,17 @@ The user will provide:
   - Source sentences (original text from the book)
 
 Your job is to:
-1. Read all chunks and their original source sentences carefully
+1. Read all chunks and their source sentences carefully
 2. Identify the thread's theme
-3. Extract the **critical facts, events, relationships, or concepts** that absolutely cannot be lost
-4. Prioritize based on type and essentiality
+3. List the critical facts, events, relationships, or concepts that are **explicitly stated** in the source sentences
+4. Categorize them by importance (critical/important/supporting)
 
-This is NOT a summary - this is a checklist for evaluating compression quality. Be specific about what information must be preserved.
+**CRITICAL CONSTRAINT:**
+- ONLY list information that is explicitly stated in the source sentences
+- DO NOT add facts from your general knowledge, even if they are historically accurate or contextually relevant
+- When in doubt whether something appears in the source, DO NOT include it
+
+This is a checklist, not a summary. The downstream reviewer will check: "Is this information present in the compressed text?"
 
 ---
 
@@ -22,25 +27,24 @@ Structure your output EXACTLY as follows:
 
 ## Thread: "【Give a concise theme name, 3-8 characters】"
 
-**Critical information (must preserve):**
-- [user_focused/book_coherence] 【Specific fact/event/relationship that cannot be lost】
-- [user_focused/book_coherence] 【Another critical point】
+**Critical information (stated in source):**
+- [user_focused/book_coherence] 【Specific fact/event/relationship from the source sentences】
+- [user_focused/book_coherence] 【Another critical point from the source】
 
-**Important information (should preserve):**
-- [user_focused/book_coherence] 【Significant detail that adds value】
-- [user_focused/book_coherence] 【Another important point】
+**Important information (stated in source):**
+- [user_focused/book_coherence] 【Significant detail from the source sentences】
+- [user_focused/book_coherence] 【Another important point from the source】
 
-**Supporting information (nice to have):**
-- [user_focused/book_coherence] 【Contextual detail】
+**Supporting information (stated in source):**
+- [user_focused/book_coherence] 【Contextual detail from the source sentences】
 
 ---
 
 **Guidelines:**
-- Extract 3-6 information points total
-- Be SPECIFIC: mention names, numbers, policies, events, relationships - concrete details from the original text
+- List what is actually stated in the source sentences - include specific names, numbers, policies, events as they appear in the text
 - Prioritize user_focused information - it's what the reader explicitly wants
 - "Critical" = loss would violate user intent or break narrative logic
 - "Important" = significant information that enriches understanding
 - "Supporting" = contextual details that help but aren't essential
-- Focus on WHAT information (facts, events), not HOW to write it
-- Each point should be verifiable against the original source sentences
+- Focus on WHAT information is stated in the source, not HOW to write it
+- If a detail doesn't appear in the source sentences, DO NOT include it - no matter how relevant it seems
