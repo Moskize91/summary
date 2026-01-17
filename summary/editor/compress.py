@@ -176,6 +176,7 @@ def compress_text(
     versions: list[CompressionVersion] = []
     previous_compressed_text: str | None = None
     revision_feedback: str | None = None
+    reviewer_histories: dict[int, tuple[str, str]] = {}  # snake_id -> (prev_compressed_text, prev_response)
 
     for iteration in range(1, max_iterations + 1):
         print(f"\n--- Iteration {iteration}/{max_iterations} ---")
@@ -224,11 +225,12 @@ def compress_text(
 
         # 4.2 Review with all reviewers
         print("Reviewing compressed text...")
-        reviews = _review_compression(
+        reviews, raw_responses = _review_compression(
             compressed_text=compressed_text,
             snake_reviewers=snake_reviewers,
             intention=intention,
             llm=llm,
+            reviewer_histories=reviewer_histories if reviewer_histories else None,
         )
 
         # 4.3 Calculate score (lower is better)
@@ -304,6 +306,10 @@ def compress_text(
             print("Preparing revision feedback...")
             revision_feedback = _collect_feedback(reviews, llm)
             previous_compressed_text = compressed_text
+
+            # Update reviewer histories for next iteration
+            for snake_id, raw_response in raw_responses.items():
+                reviewer_histories[snake_id] = (compressed_text, raw_response)
 
     # Step 5: Select best version (lowest score)
     if not versions:
@@ -436,6 +442,15 @@ def _generate_snake_reviewers(
             )
         )
 
+    # Normalize weights so they sum to 1.0
+    total_weight = sum(sr.weight for sr in snake_reviewers)
+    if total_weight > 0:
+        for sr in snake_reviewers:
+            sr.weight = sr.weight / total_weight
+        print(f"\n  Normalized weights (sum = 1.0):")
+        for sr in snake_reviewers:
+            print(f"    Snake {sr.snake_id}: {sr.weight:.3f}")
+
     return snake_reviewers
 
 
@@ -553,7 +568,8 @@ def _review_compression(
     snake_reviewers: list[SnakeReviewerInfo],
     intention: str,
     llm: LLM,
-) -> list[ReviewResult]:
+    reviewer_histories: dict[int, tuple[str, str]] | None = None,
+) -> tuple[list[ReviewResult], dict[int, str]]:
     """Review compressed text with all snake reviewers.
 
     Args:
@@ -561,11 +577,15 @@ def _review_compression(
         snake_reviewers: List of snake reviewer info
         intention: User's reading intention
         llm: LLM instance
+        reviewer_histories: Optional dict mapping snake_id to (previous_compressed_text, previous_response)
 
     Returns:
-        List of ReviewResult objects
+        Tuple of (reviews, raw_responses):
+        - reviews: List of ReviewResult objects
+        - raw_responses: Dict mapping snake_id to raw response text
     """
     reviews = []
+    raw_responses = {}
     prompt_path = Path(__file__).parent.parent / "data" / "editor" / "thread_reviewer.jinja"
 
     for sr in snake_reviewers:
@@ -575,14 +595,37 @@ def _review_compression(
         )
 
         user_message = f"{intention}\n\n---\n\n{compressed_text}"
-        response = llm.request(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            temperature=0.3,
-        )
+
+        # Check if this reviewer has history
+        has_history = reviewer_histories is not None and sr.snake_id in reviewer_histories
+
+        if has_history:
+            prev_compressed_text, prev_response = reviewer_histories[sr.snake_id]
+            # Build conversation history: system + user(prev) + assistant(prev) + user(current)
+            prev_user_message = f"{intention}\n\n---\n\n{prev_compressed_text}"
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prev_user_message},
+                {"role": "assistant", "content": prev_response},
+                {"role": "user", "content": user_message},
+            ]
+            response = llm.request_with_history(
+                messages=messages,
+                temperature=0.3,
+            )
+        else:
+            # First iteration: simple request
+            response = llm.request(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                temperature=0.3,
+            )
 
         if not response:
             raise RuntimeError(f"Snake {sr.snake_id} review failed: LLM returned empty response")
+
+        # Store raw response
+        raw_responses[sr.snake_id] = response
 
         try:
             review_json = _extract_json_from_markdown(response)
@@ -603,7 +646,7 @@ def _review_compression(
         except (ValueError, KeyError) as e:
             raise RuntimeError(f"Snake {sr.snake_id} review failed: Invalid data format - {e}") from e
 
-    return reviews
+    return reviews, raw_responses
 
 
 def _calculate_score(reviews: list[ReviewResult]) -> float:
