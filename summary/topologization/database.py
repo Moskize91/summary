@@ -22,7 +22,9 @@ def create_schema(conn: sqlite3.Connection):
             fragment_id INTEGER NOT NULL,
             sentence_index INTEGER NOT NULL,
             label TEXT NOT NULL,
-            type INTEGER NOT NULL
+            type INTEGER NOT NULL,
+            retention TEXT,
+            importance TEXT
         )
     """)
 
@@ -48,6 +50,7 @@ def create_schema(conn: sqlite3.Connection):
         CREATE TABLE IF NOT EXISTS knowledge_edges (
             from_id INTEGER NOT NULL,
             to_id INTEGER NOT NULL,
+            strength TEXT,
             PRIMARY KEY (from_id, to_id),
             FOREIGN KEY (from_id) REFERENCES chunks(id),
             FOREIGN KEY (to_id) REFERENCES chunks(id)
@@ -99,6 +102,8 @@ def insert_chunk(
     label: str,
     chunk_type: int,
     sentence_ids: list[SentenceId],
+    retention: str | None = None,
+    importance: str | None = None,
 ):
     """Insert chunk and its sentences.
 
@@ -110,6 +115,8 @@ def insert_chunk(
         label: Chunk label
         chunk_type: Type of chunk (1=user_focused, 2=book_coherence)
         sentence_ids: All sentence IDs comprising this chunk's content
+        retention: Retention level for user_focused chunks (verbatim/detailed/focused/relevant)
+        importance: Importance level for book_coherence chunks (critical/important/helpful)
     """
     cursor = conn.cursor()
 
@@ -117,10 +124,10 @@ def insert_chunk(
     fragment_id, sentence_index = sentence_id
     cursor.execute(
         """
-        INSERT INTO chunks (id, generation, fragment_id, sentence_index, label, type)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO chunks (id, generation, fragment_id, sentence_index, label, type, retention, importance)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (chunk_id, generation, fragment_id, sentence_index, label, chunk_type),
+        (chunk_id, generation, fragment_id, sentence_index, label, chunk_type, retention, importance),
     )
 
     # Insert chunk-sentence associations
@@ -137,21 +144,22 @@ def insert_chunk(
     conn.commit()
 
 
-def insert_edge(conn: sqlite3.Connection, from_id: int, to_id: int):
+def insert_edge(conn: sqlite3.Connection, from_id: int, to_id: int, strength: str | None = None):
     """Insert knowledge edge.
 
     Args:
         conn: SQLite database connection
         from_id: Source chunk ID
         to_id: Target chunk ID
+        strength: Link strength (critical/important/helpful)
     """
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT OR IGNORE INTO knowledge_edges (from_id, to_id)
-        VALUES (?, ?)
+        INSERT OR IGNORE INTO knowledge_edges (from_id, to_id, strength)
+        VALUES (?, ?, ?)
         """,
-        (from_id, to_id),
+        (from_id, to_id, strength),
     )
     conn.commit()
 

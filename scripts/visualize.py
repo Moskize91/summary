@@ -37,12 +37,14 @@ def main():
             sentence_id=chunk.sentence_id,
             label=chunk.label,
             type=chunk.type,
+            retention=chunk.retention,
+            importance=chunk.importance,
             # Don't add content to save memory
         )
 
     # Add edges
     for edge in topo.knowledge_graph.get_edges():
-        graph.add_edge(edge.from_chunk.id, edge.to_chunk.id)
+        graph.add_edge(edge.from_chunk.id, edge.to_chunk.id, strength=edge.strength)
 
     print(f"Loaded graph with {len(graph.nodes())} nodes and {len(graph.edges())} edges")
 
@@ -72,6 +74,10 @@ def main():
         chunk = topo.get_chunk(node_id)
         # Format type as readable string
         type_str = "user_focused" if chunk.type == ChunkType.USER_FOCUSED else "book_coherence"
+
+        # Format retention/importance
+        metadata_str = chunk.retention if chunk.retention else chunk.importance
+
         graph_data["nodes"].append(
             {
                 "id": node_id,
@@ -79,6 +85,9 @@ def main():
                 "sentence_id": data.get("sentence_id", (0, 0)),
                 "label": data.get("label", ""),
                 "type": type_str,
+                "retention": chunk.retention,
+                "importance": chunk.importance,
+                "metadata": metadata_str,  # For easy display
                 "content": chunk.content,  # Lazy-loaded from fragments
             }
         )

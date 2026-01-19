@@ -1,0 +1,128 @@
+You are reading a long text and need to extract essential connective tissue for maintaining the book's narrative coherence.
+
+---
+
+## CONTEXT
+
+These user-focused chunks were already extracted from this text segment:
+
+{% if user_focused_chunks %}
+{% for chunk in user_focused_chunks %}
+{{ chunk.id }}. [{{ chunk.label }}] {{ chunk.content }}
+{% endfor %}
+{% else %}
+(No user-focused chunks were extracted from this segment)
+{% endif %}
+
+**Current Working Memory:**
+{{ working_memory }}
+
+---
+
+## TASK
+
+Extract book-coherence chunks that are ESSENTIAL for understanding the book's logic but were NOT captured in the user-focused chunks above.
+
+Extract 1-3 chunks ONLY if they meet the strict criteria below. If the user-focused chunks already cover the essential connective tissue, output an empty result.
+
+---
+
+## EXTRACTION CRITERIA
+
+### What to extract (book-coherence chunks):
+
+Extract information essential for understanding the book's logic and narrative flow, REGARDLESS of the reader's personal interests. This includes:
+
+- **First introductions** of key concepts, characters, or settings that will be referenced later
+- **Causal relationships** that drive the plot or argument forward
+- **Context and background** that makes later content comprehensible
+- **Turning points or transitions** in the narrative structure
+- **Definitions, rules, or constraints** established by the author that affect subsequent content
+
+### What to avoid:
+
+- Information **already captured** in the user-focused chunks above
+- Details that **won't affect comprehension** of later content
+- Generic filler, repetition, or tangential information
+- Content that's interesting but not structurally necessary
+
+### Link criteria:
+
+Connect book-coherence chunks when there are clear **logical dependencies**, **cause-and-effect relationships**, or **narrative continuity** between them.
+
+Also link to user-focused chunks if they provide essential context for each other (e.g., book-coherence chunk explains WHY something in user-focused chunk happened).
+
+---
+
+## IMPORTANCE LEVEL GUIDELINES
+
+Rate each book-coherence chunk (being extracted means it's already important, so use only 3 levels):
+
+- **critical**: Essential setup, major turning points, or causal links that cannot be skipped
+- **important**: Key context, definitions, or transitions that significantly aid understanding
+- **helpful**: Supplementary background or minor connective tissue
+
+---
+
+## LINK STRENGTH GUIDELINES
+
+Rate each link's dependency strength:
+
+- **critical**: Must understand FROM to understand TO (cannot skip FROM)
+- **important**: FROM provides essential context for TO (should not skip FROM)
+- **helpful**: FROM and TO are related but both can stand alone (optional connection)
+
+---
+
+**Output Format (JSON only, no other text):**
+
+The user will provide the same text segment in their message. Extract ONLY book-coherence chunks that supplement the user-focused extraction.
+
+CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "links" SECOND:
+
+{
+  "chunks": [
+    {
+      "temp_id": "D",
+      "type": "book_coherence",
+      "label": "brief topic label (5-15 chars)",
+      "content": "full description of the connective information",
+      "source_sentences": ["original sentence from text"],
+      "importance": "critical"
+    }
+  ],
+  "links": [
+    {"from": "D", "to": 1, "strength": "important"},
+    {"from": 5, "to": "D", "strength": "helpful"}
+  ]
+}
+
+**If no book-coherence chunks are needed, output:**
+{
+  "chunks": [],
+  "links": []
+}
+
+**Field Explanations:**
+- "chunks": Array of book-coherence chunks (0-3 chunks, only if essential)
+  - "temp_id": Use letters continuing from user-focused chunks (if user had A,B,C then start with D,E,F)
+  - "type": MUST be "book_coherence"
+  - "label": 5-15 character summary
+  - "content": Full one-sentence description
+  - "source_sentences": Array of original sentences from the text (copy exact text)
+  - "importance": One of "critical", "important", or "helpful"
+
+- "links": Array of relationships between chunks
+  - "from" can be: working memory ID (number) OR temp_id (string from user-focused OR book-coherence chunks)
+  - "to" can be: working memory ID (number) OR temp_id (string from user-focused OR book-coherence chunks)
+  - "strength": One of "critical", "important", or "helpful"
+  - Can link book-coherence chunks to user-focused chunks (e.g., "D" to 1)
+  - Use empty array [] if no relationships exist
+
+**IMPORTANT:**
+1. The order matters! Output "chunks" FIRST, then "links" SECOND.
+2. Every chunk MUST have a "type" field set to "book_coherence".
+3. Every chunk MUST have an "importance" field with one of the three valid values.
+4. Every link MUST have a "strength" field with one of the three valid values.
+5. You CAN reference user-focused chunks in your links (using their numeric IDs).
+6. Be conservative - only extract what's truly necessary for coherence.

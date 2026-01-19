@@ -186,7 +186,7 @@ def _extract_knowledge_graph(
     wave_reflection: WaveReflection,
     max_chunks: int | None,
 ) -> tuple[nx.DiGraph, list[CognitiveChunk]]:
-    """Extract knowledge graph from input file.
+    """Extract knowledge graph from input file with two-stage extraction.
 
     Args:
         input_file: Input text file
@@ -210,25 +210,25 @@ def _extract_knowledge_graph(
             print(f"Reached max chunks limit ({max_chunks}), stopping...")
             break
 
-        print(f"Processing chunk {chunk_count}...")
+        print(f"Processing fragment {chunk_count}...")
 
-        # Extract cognitive chunks from text
-        extraction_result = extractor.extract_chunks(
+        # === Stage 1: Extract user-focused chunks ===
+        user_focused_result = extractor.extract_user_focused(
             fragment_with_sentences.text,
             working_memory,
             fragment_with_sentences.sentence_ids,
             fragment_with_sentences.sentence_texts,
         )
 
-        if extraction_result is None:
-            print(f"Warning: Extraction failed for chunk {chunk_count}")
+        if user_focused_result is None:
+            print(f"Warning: User-focused extraction failed for fragment {chunk_count}")
             continue
 
-        # Add chunks with links to working memory
-        added_chunks, edges = working_memory.add_chunks_with_links(extraction_result)
+        # Add user-focused chunks to working memory and assign IDs
+        user_focused_chunks, user_focused_edges = working_memory.add_chunks_with_links(user_focused_result)
 
-        # Add chunks to knowledge graph
-        for chunk in added_chunks:
+        # Add user-focused chunks to knowledge graph
+        for chunk in user_focused_chunks:
             knowledge_graph.add_node(
                 chunk.id,
                 generation=chunk.generation,
@@ -237,22 +237,60 @@ def _extract_knowledge_graph(
                 content=chunk.content,
             )
 
-        # Add edges to knowledge graph
-        for from_id, to_id in edges:
-            knowledge_graph.add_edge(from_id, to_id)
+        # Add user-focused edges to knowledge graph with strength
+        for from_id, to_id in user_focused_edges:
+            strength = _find_edge_strength(user_focused_result.links, from_id, to_id, user_focused_chunks, user_focused_result.temp_ids)
+            knowledge_graph.add_edge(from_id, to_id, strength=strength)
 
-        # Collect all chunks
-        all_chunks.extend(added_chunks)
+        all_chunks.extend(user_focused_chunks)
 
-        # Update working memory with wave reflection
-        latest_chunk_ids = [chunk.id for chunk in added_chunks]
-        selected_chunks = wave_reflection.select_top_chunks(
-            working_memory.get_chunks(),
-            knowledge_graph,
-            latest_chunk_ids,
+        # === Stage 2: Extract book-coherence chunks ===
+        book_coherence_result = extractor.extract_book_coherence(
+            fragment_with_sentences.text,
+            working_memory,
+            user_focused_chunks,
+            fragment_with_sentences.sentence_ids,
+            fragment_with_sentences.sentence_texts,
+        )
+
+        if book_coherence_result is not None and book_coherence_result.chunks:
+            # Add book-coherence chunks to working memory and assign IDs
+            book_coherence_chunks, book_coherence_edges = working_memory.add_chunks_with_links(book_coherence_result)
+
+            # Add book-coherence chunks to knowledge graph
+            for chunk in book_coherence_chunks:
+                knowledge_graph.add_node(
+                    chunk.id,
+                    generation=chunk.generation,
+                    sentence_id=chunk.sentence_id,
+                    label=chunk.label,
+                    content=chunk.content,
+                )
+
+            # Add book-coherence edges to knowledge graph with strength
+            # Note: Only pass book_coherence chunks/temp_ids, since user_focused chunks
+            # are already referenced by integer IDs in the links
+            for from_id, to_id in book_coherence_edges:
+                strength = _find_edge_strength(book_coherence_result.links, from_id, to_id, book_coherence_chunks, book_coherence_result.temp_ids)
+                knowledge_graph.add_edge(from_id, to_id, strength=strength)
+
+            all_chunks.extend(book_coherence_chunks)
+
+        # === Update working memory with wave reflection ===
+        # Get all chunks from current fragment (both stages)
+        current_fragment_chunk_ids = [c.id for c in working_memory.get_all_chunks_for_saving()]
+
+        # Select extra chunks from history using wave reflection
+        extra_chunks = wave_reflection.select_top_chunks(
+            all_chunks=all_chunks,
+            knowledge_graph=knowledge_graph,
+            latest_chunk_ids=current_fragment_chunk_ids,
             capacity=working_memory.capacity,
         )
-        working_memory._chunks = selected_chunks  # pylint: disable=protected-access
+
+        # Set extra chunks and finalize fragment
+        working_memory.set_extra_chunks(extra_chunks)
+        working_memory.finalize_fragment()
 
     return knowledge_graph, all_chunks
 
@@ -269,7 +307,7 @@ def _save_knowledge_graph(
         knowledge_graph: Knowledge graph
         all_chunks: All chunks
     """
-    # Save chunks
+    # Save chunks with retention/importance metadata
     for chunk in all_chunks:
         # Use the matched sentence IDs from source_sentences
         sentence_ids = chunk.sentence_ids if chunk.sentence_ids else [chunk.sentence_id]
@@ -282,11 +320,15 @@ def _save_knowledge_graph(
             chunk.label,
             chunk.chunk_type,
             sentence_ids,
+            retention=chunk.retention,
+            importance=chunk.importance,
         )
 
-    # Save edges
+    # Save edges with strength metadata
     for from_id, to_id in knowledge_graph.edges():
-        database.insert_edge(conn, from_id, to_id)
+        edge_data = knowledge_graph.edges[from_id, to_id]
+        strength = edge_data.get("strength")
+        database.insert_edge(conn, from_id, to_id, strength=strength)
 
 
 def _analyze_snakes(knowledge_graph: nx.DiGraph, config: TopologizationConfig) -> tuple[list[list[int]], nx.DiGraph]:
@@ -369,3 +411,59 @@ def _save_snakes(
             to_snake,
             edge_data["internal_edge_count"],
         )
+
+
+def _find_edge_strength(
+    links: list[dict],
+    from_id: int,
+    to_id: int,
+    chunks: list[CognitiveChunk],
+    temp_ids: list[str],
+) -> str | None:
+    """Find the strength of an edge from the links data.
+
+    Args:
+        links: Raw link data from LLM (with from/to as temp_id or int)
+        from_id: Actual from chunk ID (integer)
+        to_id: Actual to chunk ID (integer)
+        chunks: List of chunks with assigned IDs
+        temp_ids: List of temp IDs corresponding to chunks
+
+    Returns:
+        Strength string or None if not found
+    """
+    # Build mapping from chunk ID to temp ID
+    id_to_temp = {chunk.id: temp_id for chunk, temp_id in zip(chunks, temp_ids)}
+
+    # Try to find matching link
+    for link in links:
+        from_ref = link.get("from")
+        to_ref = link.get("to")
+
+        # Resolve from_ref to chunk ID
+        from_chunk_id = None
+        if isinstance(from_ref, int):
+            from_chunk_id = from_ref
+        elif isinstance(from_ref, str):
+            # Find chunk with this temp_id
+            for chunk, temp_id in zip(chunks, temp_ids):
+                if temp_id == from_ref:
+                    from_chunk_id = chunk.id
+                    break
+
+        # Resolve to_ref to chunk ID
+        to_chunk_id = None
+        if isinstance(to_ref, int):
+            to_chunk_id = to_ref
+        elif isinstance(to_ref, str):
+            # Find chunk with this temp_id
+            for chunk, temp_id in zip(chunks, temp_ids):
+                if temp_id == to_ref:
+                    to_chunk_id = chunk.id
+                    break
+
+        # Check if this link matches our edge
+        if from_chunk_id == from_id and to_chunk_id == to_id:
+            return link.get("strength")
+
+    return None

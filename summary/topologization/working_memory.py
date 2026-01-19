@@ -4,49 +4,31 @@ from .cognitive_chunk import ChunkBatch, CognitiveChunk
 class WorkingMemory:
     """Manages a limited-capacity working memory of cognitive chunks.
 
-    Implements a scoring system based on:
-    - Freshness: newly added chunks get higher scores
-    - References: chunks that are referenced more get higher scores
+    New semantics (after two-stage extraction refactor):
+    - Holds current fragment chunks (all extracted chunks in this fragment)
+    - Plus a limited number of "extra" chunks selected from history (capacity)
+    - Capacity only applies to extra chunks, not current fragment chunks
     """
 
     def __init__(self, capacity: int = 7):
         """Initialize working memory.
 
         Args:
-            capacity: Maximum number of chunks to keep in working memory
+            capacity: Number of extra chunks to select from history
                      (default: 7, based on Miller's magic number)
+                     Current fragment chunks do not count towards this limit
         """
         self.capacity = capacity
-        self._chunks: list[CognitiveChunk] = []
+        self._current_fragment_chunks: list[CognitiveChunk] = []  # Chunks from current fragment
+        self._extra_chunks: list[CognitiveChunk] = []  # Extra chunks selected from history
         self._next_id = 1
         self._generation = 0  # Tracks how many times we've added new chunks
 
-    def add_chunks(self, new_chunks: list[CognitiveChunk]) -> None:
-        """Add new chunks to working memory and evict low-scoring chunks.
-
-        Args:
-            new_chunks: List of new chunks to add
-        """
-        # Increment generation first
-        self._generation += 1
-
-        # Assign IDs and generation to new chunks
-        for chunk in new_chunks:
-            chunk.id = self._next_id
-            chunk.generation = self._generation
-            self._next_id += 1
-
-        # Merge new and existing chunks
-        all_chunks = self._chunks + new_chunks
-
-        # Calculate scores and keep top-k
-        scored_chunks = [(chunk, self._calculate_score(chunk, all_chunks)) for chunk in all_chunks]
-        scored_chunks.sort(key=lambda x: x[1], reverse=True)
-
-        self._chunks = [chunk for chunk, _ in scored_chunks[: self.capacity]]
-
     def add_chunks_with_links(self, chunk_batch: ChunkBatch) -> tuple[list[CognitiveChunk], list[tuple[int, int]]]:
         """Add new chunks with link processing to working memory.
+
+        New behavior: Only assigns IDs and adds to current fragment chunks.
+        Selection of extra chunks happens externally via wave_reflection.
 
         Args:
             chunk_batch: ChunkBatch from extractor
@@ -67,11 +49,15 @@ class WorkingMemory:
             temp_id_map[temp_id] = chunk
             self._next_id += 1
 
+        # Add to current fragment chunks
+        self._current_fragment_chunks.extend(chunk_batch.chunks)
+
         # Process links and build chunk.links arrays + collect edges
         edges = []
         for link in chunk_batch.links:
             from_ref = link["from"]
             to_ref = link["to"]
+            # Strength field will be used when saving to database (in topologize.py)
 
             # Resolve "from" reference
             if isinstance(from_ref, str):
@@ -81,9 +67,9 @@ class WorkingMemory:
                     print(f"Warning: temp_id '{from_ref}' not found in extracted chunks")
                     continue
             else:
-                # Working memory ID reference - find in existing chunks
+                # Working memory ID reference - find in all visible chunks
                 from_chunk = None
-                for chunk in self._chunks:
+                for chunk in self.get_chunks():
                     if chunk.id == from_ref:
                         from_chunk = chunk
                         break
@@ -99,9 +85,9 @@ class WorkingMemory:
                     print(f"Warning: temp_id '{to_ref}' not found in extracted chunks")
                     continue
             else:
-                # Working memory ID reference - find in existing chunks
+                # Working memory ID reference - find in all visible chunks
                 to_chunk = None
-                for chunk in self._chunks:
+                for chunk in self.get_chunks():
                     if chunk.id == to_ref:
                         to_chunk = chunk
                         break
@@ -129,9 +115,9 @@ class WorkingMemory:
                         chunk.links.append(edge_from_id)
                     break
 
-            # Also check existing chunks in working memory
+            # Also check extra chunks (they might be referenced)
             if edge_to_id not in [c.id for c in chunk_batch.chunks]:
-                for chunk in self._chunks:
+                for chunk in self._extra_chunks:
                     if chunk.id == edge_to_id:
                         if edge_from_id not in chunk.links:
                             chunk.links.append(edge_from_id)
@@ -140,45 +126,43 @@ class WorkingMemory:
             # Collect edge for later addition to knowledge graph
             edges.append((edge_from_id, edge_to_id))
 
-        # Merge new and existing chunks for working memory
-        all_chunks = self._chunks + chunk_batch.chunks
-
-        # Calculate scores and keep top-k
-        scored_chunks = [(chunk, self._calculate_score(chunk, all_chunks)) for chunk in all_chunks]
-        scored_chunks.sort(key=lambda x: x[1], reverse=True)
-
-        self._chunks = [chunk for chunk, _ in scored_chunks[: self.capacity]]
-
         return chunk_batch.chunks, edges
 
-    def _calculate_score(self, chunk: CognitiveChunk, all_chunks: list[CognitiveChunk]) -> float:
-        """Calculate importance score for a chunk.
+    def set_extra_chunks(self, extra_chunks: list[CognitiveChunk]) -> None:
+        """Set the extra chunks selected from history.
 
-        Score = freshness + reference_count
+        Called after wave_reflection selects top chunks.
 
         Args:
-            chunk: The chunk to score
-            all_chunks: All candidate chunks
+            extra_chunks: List of chunks selected from history (max capacity)
+        """
+        self._extra_chunks = extra_chunks
+
+    def finalize_fragment(self) -> list[CognitiveChunk]:
+        """Finalize current fragment and prepare for next fragment.
 
         Returns:
-            Importance score
+            List of chunks that were in the current fragment (for tracking)
         """
-        # Freshness: newer chunks get higher scores, decays with generation
-        age = self._generation - (chunk.id // 100)  # Rough age estimate
-        freshness = 1.0 / (1.0 + age)
-
-        # Reference count: how many chunks link to this chunk
-        reference_count = sum(1 for c in all_chunks if chunk.id in c.links)
-
-        return freshness + reference_count
+        finished_chunks = self._current_fragment_chunks.copy()
+        self._current_fragment_chunks = []
+        return finished_chunks
 
     def get_chunks(self) -> list[CognitiveChunk]:
         """Get current chunks in working memory.
 
         Returns:
-            List of current chunks
+            List of current fragment chunks + extra chunks
         """
-        return self._chunks.copy()
+        return self._current_fragment_chunks + self._extra_chunks
+
+    def get_all_chunks_for_saving(self) -> list[CognitiveChunk]:
+        """Get all chunks that should be saved (current fragment only).
+
+        Returns:
+            List of current fragment chunks (extra chunks are already saved)
+        """
+        return self._current_fragment_chunks.copy()
 
     def format_for_prompt(self) -> str:
         """Format chunks for LLM prompt.
@@ -186,14 +170,16 @@ class WorkingMemory:
         Returns:
             Formatted string representation with [label] - content format
         """
-        if not self._chunks:
+        chunks = self.get_chunks()
+        if not chunks:
             return "(empty)"
 
         lines = []
-        for chunk in self._chunks:
+        for chunk in chunks:
             lines.append(f"{chunk.id}. [{chunk.label}] - {chunk.content}")
         return "\n".join(lines)
 
     def clear(self) -> None:
         """Clear all chunks from working memory."""
-        self._chunks.clear()
+        self._current_fragment_chunks.clear()
+        self._extra_chunks.clear()

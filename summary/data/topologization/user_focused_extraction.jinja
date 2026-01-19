@@ -1,0 +1,106 @@
+You are reading a long text and need to extract key information based on the user's reading intention.
+
+---
+
+## RETENTION STRATEGY
+
+{{ extraction_guidance }}
+
+---
+
+## TASK
+
+Extract user-focused cognitive chunks from the new text segment based on the retention strategy above.
+
+Aim for 3-6 chunks that align with the user's intention.
+
+**Requirements:**
+1. Each chunk should be:
+   - A meaningful unit (events, concepts, facts, decisions, relationships) that matches the user's interest
+   - Have a concise label (5-15 characters) summarizing the topic
+   - Have full content description (one sentence)
+   - Have a retention level indicating how it should be preserved
+   - Can be connected to existing working memory AND/OR other chunks from the same segment
+
+2. Do NOT repeat information already in working memory
+
+**Current Working Memory:**
+{{ working_memory }}
+
+---
+
+## RETENTION LEVEL GUIDELINES
+
+Assign each chunk a retention level based on the strategy above (this is NOT about objective importance, but about HOW the user wants it preserved):
+
+- **verbatim**: User needs exact wording preserved (will be quoted directly in final output)
+- **detailed**: User needs complete information retained without compression
+- **focused**: User's primary interest that can be moderately summarized
+- **relevant**: User finds this useful but not essential (can be dropped if needed for space)
+
+Do NOT extract chunks that match the "Exclude" criteria in the retention strategy.
+
+---
+
+## LINK STRENGTH GUIDELINES
+
+Rate each link's dependency strength:
+
+- **critical**: Must understand FROM to understand TO (cannot skip FROM)
+- **important**: FROM provides essential context for TO (should not skip FROM)
+- **helpful**: FROM and TO are related but both can stand alone (optional connection)
+
+---
+
+**Output Format (JSON only, no other text):**
+
+The user will provide the new text segment in their message. Extract chunks from that text.
+
+CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "links" SECOND:
+
+{
+  "chunks": [
+    {
+      "temp_id": "A",
+      "type": "user_focused",
+      "label": "brief topic label (5-15 chars)",
+      "content": "full description of the key information",
+      "source_sentences": ["original sentence 1 from text", "original sentence 2 from text"],
+      "retention": "focused"
+    },
+    {
+      "temp_id": "B",
+      "type": "user_focused",
+      "label": "another topic label",
+      "content": "another description",
+      "source_sentences": ["original sentence from text"],
+      "retention": "detailed"
+    }
+  ],
+  "links": [
+    {"from": 1, "to": "A", "strength": "important"},
+    {"from": "A", "to": "B", "strength": "critical"},
+    {"from": 3, "to": "B", "strength": "helpful"}
+  ]
+}
+
+**Field Explanations:**
+- "chunks": Array of new information extracted from the text
+  - "temp_id": Use letters like "A", "B", "C" for chunks in this extraction
+  - "type": MUST be "user_focused"
+  - "label": 5-15 character summary
+  - "content": Full one-sentence description
+  - "source_sentences": Array of original sentences from the text that this chunk is based on (copy exact text)
+  - "retention": One of "verbatim", "detailed", "focused", or "relevant"
+
+- "links": Array of relationships between chunks
+  - "from" can be: working memory ID (number) OR temp_id (string from chunks above)
+  - "to" can be: working memory ID (number) OR temp_id (string from chunks above)
+  - "strength": One of "critical", "important", or "helpful"
+  - Use empty array [] if no relationships exist
+
+**IMPORTANT:**
+1. The order matters! Output "chunks" FIRST, then "links" SECOND.
+2. Every chunk MUST have a "type" field set to "user_focused".
+3. Every chunk MUST have a "retention" field with one of the four valid values.
+4. Every link MUST have a "strength" field with one of the three valid values.

@@ -32,74 +32,67 @@ class WaveReflection:
         latest_chunk_ids: list[int],
         capacity: int,
     ) -> list[CognitiveChunk]:
-        """Select top M chunks using Wave Reflection algorithm.
+        """Select top M extra chunks using Wave Reflection algorithm.
+
+        New semantics: Only select from historical chunks (exclude latest_chunk_ids).
+        Latest chunks are managed separately in WorkingMemory.
 
         Args:
-            all_chunks: All available chunks (including old chunks)
+            all_chunks: All available chunks (including current fragment)
             knowledge_graph: Knowledge graph with edges
-            latest_chunk_ids: IDs of chunks from the latest extraction
-            capacity: Number of chunks to select (M)
+            latest_chunk_ids: IDs of chunks from the latest extraction (to use as starting points)
+            capacity: Number of extra chunks to select from history
 
         Returns:
-            Top M chunks sorted by importance
+            Top M extra chunks selected from history (excluding latest chunks)
         """
         if not all_chunks:
             return []
 
         if not latest_chunk_ids:
-            # No new chunks, just return existing chunks (no scoring change)
+            # No new chunks, return top capacity chunks from history
             return all_chunks[:capacity]
 
         # Build chunk ID to chunk mapping
         chunk_map = {chunk.id: chunk for chunk in all_chunks}
 
-        # Lock latest chunks (they must be selected)
-        locked_chunks = [chunk_map[cid] for cid in latest_chunk_ids if cid in chunk_map]
+        # Separate current fragment chunks from historical chunks
+        latest_chunk_ids_set = set(latest_chunk_ids)
+        historical_chunks = [c for c in all_chunks if c.id not in latest_chunk_ids_set]
 
-        # If locked chunks already fill capacity, return them
-        if len(locked_chunks) >= capacity:
-            return locked_chunks[:capacity]
+        if not historical_chunks:
+            # No historical chunks available
+            return []
 
-        # Calculate remaining slots
-        remaining_capacity = capacity - len(locked_chunks)
-        locked_chunk_ids = set(latest_chunk_ids)
-
-        # Phase 1: Forward propagation
+        # Phase 1: Forward propagation (starting from latest chunks)
         forward_scores = self._forward_propagation(
             latest_chunk_ids=latest_chunk_ids,
             knowledge_graph=knowledge_graph,
         )
 
         if not forward_scores:
-            # No reachable nodes, return only locked chunks
-            return locked_chunks
+            # No reachable nodes, return top historical chunks by generation
+            historical_chunks.sort(key=lambda c: c.generation, reverse=True)
+            return historical_chunks[:capacity]
 
         # Phase 2: Reflection propagation
         reflection_scores = self._reflection_propagation(forward_scores=forward_scores, knowledge_graph=knowledge_graph)
 
-        # Score only non-locked chunks
+        # Score only historical chunks (exclude latest chunks)
         candidate_scores = []
-        for chunk_id, reflection_score in reflection_scores.items():
-            # Skip locked chunks
-            if chunk_id in locked_chunk_ids:
-                continue
-
-            chunk = chunk_map.get(chunk_id)
-            if chunk is None:
-                continue
+        for chunk in historical_chunks:
+            reflection_score = reflection_scores.get(chunk.id, 0.0)
 
             # Apply generation decay to reflection score
-            generation = chunk.generation
-            decayed_score = reflection_score * (self.generation_decay_factor**generation)
+            decayed_score = reflection_score * (self.generation_decay_factor**chunk.generation)
 
             candidate_scores.append((chunk, decayed_score))
 
-        # Sort by score (descending) and select top remaining_capacity
+        # Sort by score (descending) and select top capacity
         candidate_scores.sort(key=lambda x: x[1], reverse=True)
-        selected_from_candidates = [chunk for chunk, _ in candidate_scores[:remaining_capacity]]
+        selected_chunks = [chunk for chunk, _ in candidate_scores[:capacity]]
 
-        # Combine locked chunks with selected candidates
-        return locked_chunks + selected_from_candidates
+        return selected_chunks
 
     def _forward_propagation(
         self,

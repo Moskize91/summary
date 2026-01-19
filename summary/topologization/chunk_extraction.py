@@ -12,29 +12,31 @@ from .working_memory import WorkingMemory
 
 
 class ChunkExtractor:
-    """Extracts cognitive chunks from text using LLM."""
+    """Extracts cognitive chunks from text using LLM with two-stage extraction."""
 
     def __init__(self, llm: LLM, extraction_guidance: str):
         """Initialize the extractor.
 
         Args:
             llm: LLM client instance
-            extraction_guidance: Pre-generated guidance from user intention
+            extraction_guidance: Pre-generated retention strategy from user intention
         """
         self.llm = llm
         self.extraction_guidance = extraction_guidance
 
-        # Find prompt template internally (relative to summary/data/)
-        self.prompt_template_path = Path(__file__).parent.parent / "data" / "topologization" / "chunk_extraction.jinja"
+        # Find prompt templates internally (relative to summary/data/)
+        data_dir = Path(__file__).parent.parent / "data" / "topologization"
+        self.user_focused_template = data_dir / "user_focused_extraction.jinja"
+        self.book_coherence_template = data_dir / "book_coherence_extraction.jinja"
 
-    def extract_chunks(
+    def extract_user_focused(
         self,
         text: str,
         working_memory: WorkingMemory,
         chunk_sentence_ids: list[SentenceId],
         chunk_sentence_texts: list[str],
     ) -> ChunkBatch | None:
-        """Extract cognitive chunks from text.
+        """Extract user-focused chunks from text (Stage 1).
 
         Args:
             text: Text segment to process
@@ -43,12 +45,12 @@ class ChunkExtractor:
             chunk_sentence_texts: List of sentence texts corresponding to sentence IDs
 
         Returns:
-            ChunkBatch containing chunks, temp_ids, links, and order correctness
+            ChunkBatch containing user-focused chunks
             None if extraction failed
         """
         # Build prompt
         system_prompt = self.llm.load_system_prompt(
-            self.prompt_template_path,
+            self.user_focused_template,
             extraction_guidance=self.extraction_guidance,
             working_memory=working_memory.format_for_prompt(),
         )
@@ -57,12 +59,99 @@ class ChunkExtractor:
         response = self.llm.request(
             system_prompt=system_prompt,
             user_message=text,
-            temperature=0.3,  # Lower temperature for more consistent extraction
+            temperature=0.3,
         )
 
         if not response:
             return None
 
+        # Parse and process
+        return self._parse_and_process_chunks(
+            response=response,
+            chunk_sentence_ids=chunk_sentence_ids,
+            chunk_sentence_texts=chunk_sentence_texts,
+            expected_type="user_focused",
+            metadata_field="retention",
+        )
+
+    def extract_book_coherence(
+        self,
+        text: str,
+        working_memory: WorkingMemory,
+        user_focused_chunks: list[CognitiveChunk],
+        chunk_sentence_ids: list[SentenceId],
+        chunk_sentence_texts: list[str],
+    ) -> ChunkBatch | None:
+        """Extract book-coherence chunks from text (Stage 2).
+
+        Args:
+            text: Text segment to process (same as Stage 1)
+            working_memory: Current working memory state (includes Stage 1 chunks)
+            user_focused_chunks: Chunks extracted in Stage 1 (with assigned integer IDs)
+            chunk_sentence_ids: List of sentence IDs for this text chunk
+            chunk_sentence_texts: List of sentence texts corresponding to sentence IDs
+
+        Returns:
+            ChunkBatch containing book-coherence chunks
+            None if extraction failed
+        """
+        # Format user_focused chunks for template (show with integer IDs)
+        user_focused_for_template = []
+        for chunk in user_focused_chunks:
+            user_focused_for_template.append(
+                {
+                    "id": chunk.id,  # Show as integer ID (1, 2, 3, ...)
+                    "label": chunk.label,
+                    "content": chunk.content,
+                }
+            )
+
+        # Build prompt
+        system_prompt = self.llm.load_system_prompt(
+            self.book_coherence_template,
+            user_focused_chunks=user_focused_for_template,
+            working_memory=working_memory.format_for_prompt(),
+        )
+
+        # Call LLM
+        response = self.llm.request(
+            system_prompt=system_prompt,
+            user_message=text,
+            temperature=0.3,
+        )
+
+        if not response:
+            return None
+
+        # Parse and process (temp_id should continue from last user_focused letter)
+        return self._parse_and_process_chunks(
+            response=response,
+            chunk_sentence_ids=chunk_sentence_ids,
+            chunk_sentence_texts=chunk_sentence_texts,
+            expected_type="book_coherence",
+            metadata_field="importance",
+        )
+
+    def _parse_and_process_chunks(
+        self,
+        response: str,
+        chunk_sentence_ids: list[SentenceId],
+        chunk_sentence_texts: list[str],
+        expected_type: str,
+        metadata_field: str,
+    ) -> ChunkBatch | None:
+        """Parse LLM response and process chunks.
+
+        Args:
+            response: LLM response text
+            chunk_sentence_ids: List of sentence IDs
+            chunk_sentence_texts: List of sentence texts
+            expected_type: Expected chunk type ("user_focused" or "book_coherence")
+            metadata_field: Metadata field to extract ("retention" or "importance")
+
+        Returns:
+            ChunkBatch or None if parsing failed
+        """
         # Parse JSON response
         try:
             parsed_data = self._parse_json_response(response)
@@ -104,17 +193,20 @@ class ChunkExtractor:
                 if not matched_sentence_ids:
                     fallback_id = min(chunk_sentence_ids) if chunk_sentence_ids else (0, 0)
                     matched_sentence_ids = [fallback_id]
-                    # TODO: 应该直接报错，要求 AI 重新提供。我都这么严格的方式，都没发匹配，肯定有问题的。
                     print(f"[[WARNING]] Failed to match source_sentences for chunk '{data.get('label', 'unknown')}'")
-                    print(f"  Source sentences: {source_sentences[:1]}...")  # Show first source sentence
+                    print(f"  Source sentences: {source_sentences[:1]}...")
                     print(f"  Using fallback sentence_id: {fallback_id}")
 
                 # Use first matched sentence ID as primary sentence_id (for sorting)
                 primary_sentence_id = matched_sentence_ids[0]
 
-                # Parse type field (default to 1=user_focused if not present)
-                chunk_type_str = data.get("type", "user_focused")
+                # Parse type field (should match expected_type)
+                chunk_type_str = data.get("type", expected_type)
                 chunk_type = 1 if chunk_type_str == "user_focused" else 2
+
+                # Extract metadata (retention or importance)
+                retention = data.get("retention") if metadata_field == "retention" else None
+                importance = data.get("importance") if metadata_field == "importance" else None
 
                 chunk = CognitiveChunk(
                     id=0,  # Will be assigned by WorkingMemory
@@ -125,6 +217,8 @@ class ChunkExtractor:
                     content=data.get("content", ""),
                     chunk_type=chunk_type,
                     links=[],  # Will be populated after ID assignment
+                    retention=retention,
+                    importance=importance,
                 )
                 chunks.append(chunk)
                 temp_ids.append(data.get("temp_id", ""))
@@ -132,7 +226,7 @@ class ChunkExtractor:
             return ChunkBatch(
                 chunks=chunks,
                 temp_ids=temp_ids,
-                links=links_data,
+                links=links_data,  # Keep strength field from LLM
                 order_correct=order_correct,
             )
 

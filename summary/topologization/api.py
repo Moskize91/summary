@@ -34,10 +34,12 @@ class ChunkEdge:
     Attributes:
         from_chunk: Source chunk
         to_chunk: Target chunk
+        strength: Link strength (critical/important/helpful)
     """
 
     from_chunk: "Chunk"
     to_chunk: "Chunk"
+    strength: str | None = None
 
 
 @dataclass
@@ -68,6 +70,8 @@ class Chunk:
     label: str
     type: ChunkType  # Type of chunk (user_focused or book_coherence)
     _topologization: "Topologization" = field(repr=False)  # Reference for lazy loading
+    retention: str | None = None  # user_focused: verbatim/detailed/focused/relevant
+    importance: str | None = None  # book_coherence: critical/important/helpful
     _content: str | None = field(default=None, repr=False)  # Lazy-loaded
     _sentence_ids: list[SentenceId] | None = field(default=None, repr=False)  # Lazy-loaded
 
@@ -113,11 +117,18 @@ class Chunk:
             List of ChunkEdge objects
         """
         cursor = self._topologization._conn.execute(
-            "SELECT to_id FROM knowledge_edges WHERE from_id = ?",
+            "SELECT to_id, strength FROM knowledge_edges WHERE from_id = ?",
             (self.id,),
         )
-        to_ids = [row[0] for row in cursor]
-        return [ChunkEdge(from_chunk=self, to_chunk=self._topologization.get_chunk(to_id)) for to_id in to_ids]
+        edges_data = [(row[0], row[1]) for row in cursor]
+        return [
+            ChunkEdge(
+                from_chunk=self,
+                to_chunk=self._topologization.get_chunk(to_id),
+                strength=strength,
+            )
+            for to_id, strength in edges_data
+        ]
 
     def get_incoming_edges(self) -> list[ChunkEdge]:
         """Get edges from other chunks to this chunk.
@@ -126,11 +137,18 @@ class Chunk:
             List of ChunkEdge objects
         """
         cursor = self._topologization._conn.execute(
-            "SELECT from_id FROM knowledge_edges WHERE to_id = ?",
+            "SELECT from_id, strength FROM knowledge_edges WHERE to_id = ?",
             (self.id,),
         )
-        from_ids = [row[0] for row in cursor]
-        return [ChunkEdge(from_chunk=self._topologization.get_chunk(from_id), to_chunk=self) for from_id in from_ids]
+        edges_data = [(row[0], row[1]) for row in cursor]
+        return [
+            ChunkEdge(
+                from_chunk=self._topologization.get_chunk(from_id),
+                to_chunk=self,
+                strength=strength,
+            )
+            for from_id, strength in edges_data
+        ]
 
 
 @dataclass
@@ -238,8 +256,8 @@ class KnowledgeGraph(Graph[Chunk, ChunkEdge]):
         self._node_ids = [row[0] for row in cursor]
 
         # Load all edges
-        cursor = self._conn.execute("SELECT from_id, to_id FROM knowledge_edges")
-        self._edge_tuples = [(row[0], row[1]) for row in cursor]
+        cursor = self._conn.execute("SELECT from_id, to_id, strength FROM knowledge_edges")
+        self._edge_tuples = [(row[0], row[1], row[2]) for row in cursor]
 
     def __iter__(self) -> Iterator[Chunk]:
         """Iterate all chunks (lazy-load content on demand).
@@ -271,8 +289,9 @@ class KnowledgeGraph(Graph[Chunk, ChunkEdge]):
             ChunkEdge(
                 from_chunk=self._topologization.get_chunk(from_id),
                 to_chunk=self._topologization.get_chunk(to_id),
+                strength=strength,
             )
-            for from_id, to_id in self._edge_tuples
+            for from_id, to_id, strength in self._edge_tuples
         ]
 
     def to_networkx(self) -> nx.DiGraph:
@@ -294,8 +313,8 @@ class KnowledgeGraph(Graph[Chunk, ChunkEdge]):
             )
 
         # Add all edges
-        for from_id, to_id in self._edge_tuples:
-            g.add_edge(from_id, to_id)
+        for from_id, to_id, strength in self._edge_tuples:
+            g.add_edge(from_id, to_id, strength=strength)
 
         return g
 
@@ -442,7 +461,7 @@ class Topologization:
             ValueError: If chunk not found
         """
         cursor = self._conn.execute(
-            "SELECT id, generation, fragment_id, sentence_index, label, type FROM chunks WHERE id = ?",
+            "SELECT id, generation, fragment_id, sentence_index, label, type, retention, importance FROM chunks WHERE id = ?",
             (chunk_id,),
         )
         row = cursor.fetchone()
@@ -455,6 +474,8 @@ class Topologization:
             sentence_id=(row[2], row[3]),
             label=row[4],
             type=ChunkType(row[5]),
+            retention=row[6],
+            importance=row[7],
             _topologization=self,
         )
 

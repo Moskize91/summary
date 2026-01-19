@@ -29,3 +29,13 @@ python -m venv .venv
 ```shell
 poetry install
 ```
+
+## Code Quality
+
+### Linting and Formatting
+
+Run ruff to check and fix code issues, and format code:
+
+```shell
+ruff check --fix scripts summary tests && ruff format scripts summary tests
+```

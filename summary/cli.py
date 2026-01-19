@@ -152,7 +152,7 @@ def main(args: list[str] | None = None) -> int:
     )
 
     try:
-        intention = "压缩此书，重点关注朱元璋所出位置的变化，要详细交代他从哪移动到哪，使用什么交通工具，每次花了多长时间。顺便要交代为什么他要移动，是为了躲避灾难，还是主动前往。其他的可忽略。"
+        intention = "压缩此书，重点关注朱元璋的心理变化。对于有关朱元璋心境改变和成长的关键点，必须整段保留，其他内容可以适当压缩。"
 
         # Run topologization
         topologization = topologize(
