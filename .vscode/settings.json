@@ -27,6 +27,7 @@
     "pytest",
     "pyvis",
     "sentencizer",
+    "topo",
     "topologization",
     "topologize",
     "venv"

@@ -47,17 +47,28 @@ def main():
 
     print(f"Loaded graph with {len(graph.nodes())} nodes and {len(graph.edges())} edges")
 
-    # Collect snakes from snake graph
+    # Collect snakes from snake graph with metadata
     snakes = []
+    snake_metadata = []
     for snake in topo.snake_graph:
         snakes.append(snake.chunk_ids)
+        snake_metadata.append({
+            "snake_id": snake.snake_id,
+            "tokens": snake.tokens,
+            "weight": snake.weight,
+            "size": snake.size,
+        })
 
     if snakes:
         print(f"\nFound {len(snakes)} snakes:")
         for i, snake_chunk_ids in enumerate(snakes):
             first_node = graph.nodes[snake_chunk_ids[0]]
             last_node = graph.nodes[snake_chunk_ids[-1]]
-            print(f"  Snake {i}: {len(snake_chunk_ids)} nodes - {first_node['label']} → {last_node['label']}")
+            metadata = snake_metadata[i]
+            print(
+                f"  Snake {i}: {len(snake_chunk_ids)} nodes, {metadata['tokens']} tokens - "
+                f"{first_node['label']} → {last_node['label']}"
+            )
     else:
         print("\nNo snakes detected (all nodes will be shown in gray)")
 
@@ -96,7 +107,7 @@ def main():
     # Generate visualization
     print("\nGenerating visualization...")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    visualize_snakes(graph, snakes, output_path, graph_data)
+    visualize_snakes(graph, snakes, output_path, graph_data, snake_metadata)
 
     # Close database connection
     topo.close()

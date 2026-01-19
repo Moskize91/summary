@@ -99,10 +99,10 @@ def main(args: list[str] | None = None) -> int:
     )
 
     parser.add_argument(
-        "--phase2-ratio",
-        type=float,
-        default=0.15,
-        help="Phase 2 stop ratio for snake detection (0-1)",
+        "--snake-tokens",
+        type=int,
+        default=700,
+        help="Maximum tokens allowed in a snake",
     )
 
     # Parse arguments
@@ -148,12 +148,14 @@ def main(args: list[str] | None = None) -> int:
         generation_decay_factor=parsed_args.decay_factor,
         max_chunks=max_chunks,
         min_cluster_size=parsed_args.min_snake_size,
-        phase2_stop_ratio=parsed_args.phase2_ratio,
+        snake_tokens=parsed_args.snake_tokens,
     )
 
     try:
-        intention = "压缩此书，重点关注朱元璋的心理变化。对于有关朱元璋心境改变和成长的关键点，必须整段保留，其他内容可以适当压缩。"
-
+        intention: str = (
+            "压缩此书，重点关注朱元璋的心理变化。"
+            "对于有关朱元璋心境改变和成长的关键点，必须整段保留，其他内容可以适当压缩。"
+        )
         # Run topologization
         topologization = topologize(
             intention=intention,
@@ -163,7 +165,6 @@ def main(args: list[str] | None = None) -> int:
             llm=llm,
             encoding=get_encoding("o200k_base"),
         )
-
         # Run compression
         compressed_text = compress_text(
             topologization=topologization,

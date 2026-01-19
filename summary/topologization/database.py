@@ -25,7 +25,8 @@ def create_schema(conn: sqlite3.Connection):
             content TEXT NOT NULL,
             retention TEXT,
             importance TEXT,
-            tokens INTEGER NOT NULL DEFAULT 0
+            tokens INTEGER NOT NULL DEFAULT 0,
+            weight REAL NOT NULL DEFAULT 0.0
         )
     """)
 
@@ -52,6 +53,7 @@ def create_schema(conn: sqlite3.Connection):
             from_id INTEGER NOT NULL,
             to_id INTEGER NOT NULL,
             strength TEXT,
+            weight REAL NOT NULL DEFAULT 0.1,
             PRIMARY KEY (from_id, to_id),
             FOREIGN KEY (from_id) REFERENCES chunks(id),
             FOREIGN KEY (to_id) REFERENCES chunks(id)
@@ -64,7 +66,9 @@ def create_schema(conn: sqlite3.Connection):
             snake_id INTEGER PRIMARY KEY,
             size INTEGER NOT NULL,
             first_label TEXT NOT NULL,
-            last_label TEXT NOT NULL
+            last_label TEXT NOT NULL,
+            tokens INTEGER NOT NULL DEFAULT 0,
+            weight REAL NOT NULL DEFAULT 0.0
         )
     """)
 
@@ -85,7 +89,7 @@ def create_schema(conn: sqlite3.Connection):
         CREATE TABLE IF NOT EXISTS snake_edges (
             from_snake INTEGER NOT NULL,
             to_snake INTEGER NOT NULL,
-            internal_edge_count INTEGER NOT NULL,
+            weight REAL NOT NULL DEFAULT 0.1,
             PRIMARY KEY (from_snake, to_snake),
             FOREIGN KEY (from_snake) REFERENCES snakes(snake_id),
             FOREIGN KEY (to_snake) REFERENCES snakes(snake_id)
@@ -106,6 +110,7 @@ def insert_chunk(
     retention: str | None = None,
     importance: str | None = None,
     tokens: int = 0,
+    weight: float = 0.0,
 ):
     """Insert chunk and its sentences.
 
@@ -120,6 +125,7 @@ def insert_chunk(
         retention: Retention level (verbatim/detailed/focused/relevant)
         importance: Importance level (critical/important/helpful)
         tokens: Total token count of original source sentences
+        weight: Node weight (computed from retention + importance)
     """
     cursor = conn.cursor()
 
@@ -127,10 +133,10 @@ def insert_chunk(
     fragment_id, sentence_index = sentence_id
     cursor.execute(
         """
-        INSERT INTO chunks (id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO chunks (id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens, weight)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (chunk_id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens),
+        (chunk_id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens, weight),
     )
 
     # Insert chunk-sentence associations
@@ -147,7 +153,7 @@ def insert_chunk(
     conn.commit()
 
 
-def insert_edge(conn: sqlite3.Connection, from_id: int, to_id: int, strength: str | None = None):
+def insert_edge(conn: sqlite3.Connection, from_id: int, to_id: int, strength: str | None = None, weight: float = 0.1):
     """Insert knowledge edge.
 
     Args:
@@ -155,14 +161,15 @@ def insert_edge(conn: sqlite3.Connection, from_id: int, to_id: int, strength: st
         from_id: Source chunk ID
         to_id: Target chunk ID
         strength: Link strength (critical/important/helpful)
+        weight: Edge weight (default: 0.1)
     """
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT OR IGNORE INTO knowledge_edges (from_id, to_id, strength)
-        VALUES (?, ?, ?)
+        INSERT OR IGNORE INTO knowledge_edges (from_id, to_id, strength, weight)
+        VALUES (?, ?, ?, ?)
         """,
-        (from_id, to_id, strength),
+        (from_id, to_id, strength, weight),
     )
     conn.commit()
 
@@ -173,6 +180,8 @@ def insert_snake(
     size: int,
     first_label: str,
     last_label: str,
+    tokens: int = 0,
+    weight: float = 0.0,
 ):
     """Insert snake metadata.
 
@@ -182,14 +191,16 @@ def insert_snake(
         size: Number of chunks in snake
         first_label: Label of first chunk
         last_label: Label of last chunk
+        tokens: Total tokens in snake (sum of chunk tokens)
+        weight: Total weight of snake (sum of chunk weights)
     """
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO snakes (snake_id, size, first_label, last_label)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO snakes (snake_id, size, first_label, last_label, tokens, weight)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (snake_id, size, first_label, last_label),
+        (snake_id, size, first_label, last_label, tokens, weight),
     )
     conn.commit()
 
@@ -223,7 +234,7 @@ def insert_snake_edge(
     conn: sqlite3.Connection,
     from_snake: int,
     to_snake: int,
-    internal_edge_count: int,
+    weight: float,
 ):
     """Insert snake edge (inter-snake connection).
 
@@ -231,15 +242,15 @@ def insert_snake_edge(
         conn: SQLite database connection
         from_snake: Source snake ID
         to_snake: Target snake ID
-        internal_edge_count: Number of chunk-level edges between snakes
+        weight: Total weight of edges between snakes (sum of chunk edge weights)
     """
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO snake_edges (from_snake, to_snake, internal_edge_count)
+        INSERT INTO snake_edges (from_snake, to_snake, weight)
         VALUES (?, ?, ?)
         """,
-        (from_snake, to_snake, internal_edge_count),
+        (from_snake, to_snake, weight),
     )
     conn.commit()
 

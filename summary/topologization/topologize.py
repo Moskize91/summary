@@ -12,6 +12,7 @@ from .api import Topologization
 from .chunk_extraction import ChunkExtractor
 from .cognitive_chunk import CognitiveChunk
 from .fragment import FragmentWriter
+from .graph_weights import add_weights_to_graph, compute_node_weights
 from .snake_detector import SnakeDetector, split_connected_components
 from .snake_graph_builder import SnakeGraphBuilder
 from .text_fragmenter import TextFragmenter
@@ -316,6 +317,10 @@ def _extract_knowledge_graph(
         working_memory.set_extra_chunks(extra_chunks)
         working_memory.finalize_fragment()
 
+    # Compute and add weights to knowledge graph
+    print("\nComputing node and edge weights...")
+    add_weights_to_graph(knowledge_graph)
+
     return knowledge_graph, all_chunks
 
 
@@ -331,10 +336,13 @@ def _save_knowledge_graph(
         knowledge_graph: Knowledge graph
         all_chunks: All chunks
     """
-    # Save chunks with retention/importance metadata
+    # Save chunks with retention/importance metadata and computed weight
     for chunk in all_chunks:
         # Use the matched sentence IDs from source_sentences
         sentence_ids = chunk.sentence_ids if chunk.sentence_ids else [chunk.sentence_id]
+
+        # Get computed weight from knowledge graph node
+        node_weight = knowledge_graph.nodes[chunk.id].get("weight", 0.0)
 
         database.insert_chunk(
             conn,
@@ -347,13 +355,15 @@ def _save_knowledge_graph(
             retention=chunk.retention,
             importance=chunk.importance,
             tokens=chunk.tokens,
+            weight=node_weight,
         )
 
-    # Save edges with strength metadata
+    # Save edges with strength and weight metadata
     for from_id, to_id in knowledge_graph.edges():
         edge_data = knowledge_graph.edges[from_id, to_id]
         strength = edge_data.get("strength")
-        database.insert_edge(conn, from_id, to_id, strength=strength)
+        weight = edge_data.get("weight", 0.1)
+        database.insert_edge(conn, from_id, to_id, strength=strength, weight=weight)
 
 
 def _analyze_snakes(knowledge_graph: nx.DiGraph, config: TopologizationConfig) -> tuple[list[list[int]], nx.DiGraph]:
@@ -415,12 +425,18 @@ def _save_snakes(
         first_node = knowledge_graph.nodes[snake[0]]
         last_node = knowledge_graph.nodes[snake[-1]]
 
+        # Calculate total tokens and weight for this snake
+        total_tokens = sum(knowledge_graph.nodes[chunk_id].get("tokens", 0) for chunk_id in snake)
+        total_weight = sum(knowledge_graph.nodes[chunk_id].get("weight", 0.0) for chunk_id in snake)
+
         database.insert_snake(
             conn,
             snake_id,
             len(snake),
             first_node["label"],
             last_node["label"],
+            tokens=total_tokens,
+            weight=total_weight,
         )
 
         # Save snake-chunk associations
@@ -434,7 +450,7 @@ def _save_snakes(
             conn,
             from_snake,
             to_snake,
-            edge_data["internal_edge_count"],
+            edge_data["weight"],
         )
 
 

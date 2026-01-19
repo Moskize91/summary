@@ -22,11 +22,13 @@ class ChunkEdge:
         from_chunk: Source chunk
         to_chunk: Target chunk
         strength: Link strength (critical/important/helpful)
+        weight: Edge weight (computed from node attributes and link strength)
     """
 
     from_chunk: "Chunk"
     to_chunk: "Chunk"
     strength: str | None = None
+    weight: float = 0.1
 
 
 @dataclass
@@ -36,12 +38,12 @@ class SnakeEdge:
     Attributes:
         from_snake: Source snake
         to_snake: Target snake
-        weight: Number of internal chunk-level edges between these snakes
+        weight: Total weight of chunk edges between these snakes
     """
 
     from_snake: "Snake"
     to_snake: "Snake"
-    chunk_edge_count: int
+    weight: float
 
 
 @dataclass
@@ -56,10 +58,11 @@ class Chunk:
     sentence_id: SentenceId  # Primary sentence ID for ordering
     label: str
     content: str  # AI-generated summary content
-    _topologization: "Topologization" = field(repr=False)  # Reference for lazy loading
+    _topologization: "Topologization"  # Reference for lazy loading
     retention: str | None = None  # verbatim/detailed/focused/relevant
     importance: str | None = None  # critical/important/helpful
     tokens: int = 0  # Total token count of original source sentences
+    weight: float = 0.0  # Node weight (computed from retention + importance)
     _sentence_ids: list[SentenceId] | None = field(default=None, repr=False)  # Lazy-loaded
 
     @property
@@ -87,17 +90,18 @@ class Chunk:
             List of ChunkEdge objects
         """
         cursor = self._topologization._conn.execute(
-            "SELECT to_id, strength FROM knowledge_edges WHERE from_id = ?",
+            "SELECT to_id, strength, weight FROM knowledge_edges WHERE from_id = ?",
             (self.id,),
         )
-        edges_data = [(row[0], row[1]) for row in cursor]
+        edges_data = [(row[0], row[1], row[2]) for row in cursor]
         return [
             ChunkEdge(
                 from_chunk=self,
                 to_chunk=self._topologization.get_chunk(to_id),
                 strength=strength,
+                weight=weight,
             )
-            for to_id, strength in edges_data
+            for to_id, strength, weight in edges_data
         ]
 
     def get_incoming_edges(self) -> list[ChunkEdge]:
@@ -107,17 +111,18 @@ class Chunk:
             List of ChunkEdge objects
         """
         cursor = self._topologization._conn.execute(
-            "SELECT from_id, strength FROM knowledge_edges WHERE to_id = ?",
+            "SELECT from_id, strength, weight FROM knowledge_edges WHERE to_id = ?",
             (self.id,),
         )
-        edges_data = [(row[0], row[1]) for row in cursor]
+        edges_data = [(row[0], row[1], row[2]) for row in cursor]
         return [
             ChunkEdge(
                 from_chunk=self._topologization.get_chunk(from_id),
                 to_chunk=self,
                 strength=strength,
+                weight=weight,
             )
-            for from_id, strength in edges_data
+            for from_id, strength, weight in edges_data
         ]
 
 
@@ -132,7 +137,9 @@ class Snake:
     size: int
     first_label: str
     last_label: str
-    _topologization: "Topologization" = field(repr=False)
+    _topologization: "Topologization"
+    tokens: int = 0  # Total tokens in snake (sum of chunk tokens)
+    weight: float = 0.0  # Total weight of snake (sum of chunk weights)
     _chunk_ids: list[int] | None = field(default=None, repr=False)  # Lazy-loaded
 
     @property
@@ -165,7 +172,7 @@ class Snake:
             List of SnakeEdge objects with weights
         """
         cursor = self._topologization._conn.execute(
-            "SELECT to_snake, internal_edge_count FROM snake_edges WHERE from_snake = ?",
+            "SELECT to_snake, weight FROM snake_edges WHERE from_snake = ?",
             (self.snake_id,),
         )
         edges_data = [(row[0], row[1]) for row in cursor]
@@ -173,9 +180,9 @@ class Snake:
             SnakeEdge(
                 from_snake=self,
                 to_snake=self._topologization.get_snake(to_id),
-                chunk_edge_count=count,
+                weight=weight,
             )
-            for to_id, count in edges_data
+            for to_id, weight in edges_data
         ]
 
     def get_incoming_edges(self) -> list[SnakeEdge]:
@@ -185,7 +192,7 @@ class Snake:
             List of SnakeEdge objects with weights
         """
         cursor = self._topologization._conn.execute(
-            "SELECT from_snake, internal_edge_count FROM snake_edges WHERE to_snake = ?",
+            "SELECT from_snake, weight FROM snake_edges WHERE to_snake = ?",
             (self.snake_id,),
         )
         edges_data = [(row[0], row[1]) for row in cursor]
@@ -193,9 +200,9 @@ class Snake:
             SnakeEdge(
                 from_snake=self._topologization.get_snake(from_id),
                 to_snake=self,
-                chunk_edge_count=count,
+                weight=weight,
             )
-            for from_id, count in edges_data
+            for from_id, weight in edges_data
         ]
 
 
@@ -225,9 +232,9 @@ class KnowledgeGraph(Graph[Chunk, ChunkEdge]):
         cursor = self._conn.execute("SELECT id FROM chunks ORDER BY id")
         self._node_ids = [row[0] for row in cursor]
 
-        # Load all edges
-        cursor = self._conn.execute("SELECT from_id, to_id, strength FROM knowledge_edges")
-        self._edge_tuples = [(row[0], row[1], row[2]) for row in cursor]
+        # Load all edges with weight
+        cursor = self._conn.execute("SELECT from_id, to_id, strength, weight FROM knowledge_edges")
+        self._edge_tuples = [(row[0], row[1], row[2], row[3]) for row in cursor]
 
     def __iter__(self) -> Iterator[Chunk]:
         """Iterate all chunks (lazy-load content on demand).
@@ -260,8 +267,9 @@ class KnowledgeGraph(Graph[Chunk, ChunkEdge]):
                 from_chunk=self._topologization.get_chunk(from_id),
                 to_chunk=self._topologization.get_chunk(to_id),
                 strength=strength,
+                weight=weight,
             )
-            for from_id, to_id, strength in self._edge_tuples
+            for from_id, to_id, strength, weight in self._edge_tuples
         ]
 
     def to_networkx(self) -> nx.DiGraph:
@@ -282,9 +290,9 @@ class KnowledgeGraph(Graph[Chunk, ChunkEdge]):
                 # Don't add content to save memory
             )
 
-        # Add all edges
-        for from_id, to_id, strength in self._edge_tuples:
-            g.add_edge(from_id, to_id, strength=strength)
+        # Add all edges with weight
+        for from_id, to_id, strength, weight in self._edge_tuples:
+            g.add_edge(from_id, to_id, strength=strength, weight=weight)
 
         return g
 
@@ -306,7 +314,7 @@ class SnakeGraph(Graph[Snake, SnakeEdge]):
         self._topologization = topologization
         # Load graph structure at construction
         self._snake_ids: list[int] = []
-        self._edge_tuples: list[tuple[int, int, int]] = []  # (from, to, count)
+        self._edge_tuples: list[tuple[int, int, float]] = []  # (from, to, weight)
         self._load_structure()
 
     def _load_structure(self):
@@ -315,8 +323,8 @@ class SnakeGraph(Graph[Snake, SnakeEdge]):
         cursor = self._conn.execute("SELECT snake_id FROM snakes ORDER BY snake_id")
         self._snake_ids = [row[0] for row in cursor]
 
-        # Load all edges with counts
-        cursor = self._conn.execute("SELECT from_snake, to_snake, internal_edge_count FROM snake_edges")
+        # Load all edges with weights
+        cursor = self._conn.execute("SELECT from_snake, to_snake, weight FROM snake_edges")
         self._edge_tuples = [(row[0], row[1], row[2]) for row in cursor]
 
     def __iter__(self) -> Iterator[Snake]:
@@ -343,15 +351,15 @@ class SnakeGraph(Graph[Snake, SnakeEdge]):
         """Get all edges as SnakeEdge objects.
 
         Returns:
-            List of SnakeEdge objects with weight (internal edge count)
+            List of SnakeEdge objects with weight
         """
         return [
             SnakeEdge(
                 from_snake=self._topologization.get_snake(from_id),
                 to_snake=self._topologization.get_snake(to_id),
-                chunk_edge_count=count,
+                weight=weight,
             )
-            for from_id, to_id, count in self._edge_tuples
+            for from_id, to_id, weight in self._edge_tuples
         ]
 
     def to_networkx(self) -> nx.DiGraph:
@@ -372,9 +380,9 @@ class SnakeGraph(Graph[Snake, SnakeEdge]):
                 # Summary loaded on demand
             )
 
-        # Add all edges
-        for from_id, to_id, count in self._edge_tuples:
-            g.add_edge(from_id, to_id, internal_edge_count=count)
+        # Add all edges with weight
+        for from_id, to_id, weight in self._edge_tuples:
+            g.add_edge(from_id, to_id, weight=weight)
 
         return g
 
@@ -432,7 +440,7 @@ class Topologization:
         """
         cursor = self._conn.execute(
             (
-                "SELECT id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens"
+                "SELECT id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens, weight"
                 " FROM chunks WHERE id = ?"
             ),
             (chunk_id,),
@@ -450,6 +458,7 @@ class Topologization:
             retention=row[6],
             importance=row[7],
             tokens=row[8],
+            weight=row[9],
             _topologization=self,
         )
 
@@ -466,7 +475,7 @@ class Topologization:
             ValueError: If snake not found
         """
         cursor = self._conn.execute(
-            "SELECT snake_id, size, first_label, last_label FROM snakes WHERE snake_id = ?",
+            "SELECT snake_id, size, first_label, last_label, tokens, weight FROM snakes WHERE snake_id = ?",
             (snake_id,),
         )
         row = cursor.fetchone()
@@ -478,6 +487,8 @@ class Topologization:
             size=row[1],
             first_label=row[2],
             last_label=row[3],
+            tokens=row[4],
+            weight=row[5],
             _topologization=self,
         )
 

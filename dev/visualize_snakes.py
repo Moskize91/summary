@@ -35,6 +35,7 @@ def visualize_snakes(
     snakes: list[list[int]],
     output_path: Path,
     graph_data: dict,
+    snake_metadata: list[dict] | None = None,
 ) -> None:
     """Generate visualization with color-coded snakes and link strength-based edge width.
 
@@ -43,6 +44,7 @@ def visualize_snakes(
         snakes: List of detected snakes
         output_path: Output file path (without extension)
         graph_data: Original graph data dict for tooltips (must include edges with "strength" field)
+        snake_metadata: Optional list of metadata dicts for each snake (tokens, weight, etc.)
     """
     # Create graphviz digraph
     dot = Digraph(comment="Knowledge Graph with Snakes", format="svg")
@@ -199,7 +201,7 @@ def visualize_snakes(
 
     # Generate HTML wrapper
     html_path = Path(f"{output_path_str}.html")
-    _generate_html_wrapper(svg_path, html_path, graph_data, snakes, node_to_snake)
+    _generate_html_wrapper(svg_path, html_path, graph_data, snakes, node_to_snake, snake_metadata)
 
     print(f"\nSnake visualization saved to: {html_path}")
     print(f"Open it in your browser: file://{html_path.resolve()}")
@@ -211,6 +213,7 @@ def _generate_html_wrapper(
     graph_data: dict,
     snakes: list[list[int]],
     node_to_snake: dict,
+    snake_metadata: list[dict] | None = None,
 ) -> None:
     """Generate HTML file with interactive tooltips and snake legend.
 
@@ -220,6 +223,7 @@ def _generate_html_wrapper(
         graph_data: Graph data dict
         snakes: List of detected snakes
         node_to_snake: Mapping from node ID to snake ID
+        snake_metadata: Optional list of metadata dicts for each snake
     """
     # Read SVG content and extract dimensions
     with open(svg_path, encoding="utf-8") as f:
@@ -258,7 +262,12 @@ def _generate_html_wrapper(
         }
         # Add snake info
         if node["id"] in node_to_snake:
-            node_info["snake_id"] = node_to_snake[node["id"]]
+            snake_id = node_to_snake[node["id"]]
+            node_info["snake_id"] = snake_id
+            # Add snake metadata if available
+            if snake_metadata and snake_id < len(snake_metadata):
+                node_info["snake_tokens"] = snake_metadata[snake_id]["tokens"]
+                node_info["snake_weight"] = snake_metadata[snake_id]["weight"]
         node_data[node_id] = node_info
 
     # Build snake legend
@@ -281,10 +290,17 @@ def _generate_html_wrapper(
         # Get first and last chunk labels
         first_node = next(n for n in graph_data["nodes"] if n["id"] == snake[0])
         last_node = next(n for n in graph_data["nodes"] if n["id"] == snake[-1])
+
+        # Build legend text with tokens info
+        legend_text = f"Snake {i}: {first_node['label']} → {last_node['label']} ({len(snake)} nodes"
+        if snake_metadata and i < len(snake_metadata):
+            legend_text += f", {snake_metadata[i]['tokens']} tokens"
+        legend_text += ")"
+
         legend_items.append(
             f'<div class="legend-item">'
             f'<span class="legend-color" style="background-color: {color};"></span>'
-            f'<span class="legend-text">Snake {i}: {first_node["label"]} → {last_node["label"]} ({len(snake)} nodes)</span>'
+            f'<span class="legend-text">{legend_text}</span>'
             f"</div>"
         )
 
@@ -524,7 +540,11 @@ def _generate_html_wrapper(
             node.addEventListener('mouseenter', (e) => {{
                 let snakeInfo = '';
                 if (data.snake_id !== undefined) {{
-                    snakeInfo = `<div class="tooltip-snake">🐍 Snake ${{data.snake_id}}</div>`;
+                    snakeInfo = `<div class="tooltip-snake">🐍 Snake ${{data.snake_id}}`;
+                    if (data.snake_tokens !== undefined) {{
+                        snakeInfo += ` (📊 ${{data.snake_tokens}} tokens)`;
+                    }}
+                    snakeInfo += `</div>`;
                 }}
 
                 // Format attributes
