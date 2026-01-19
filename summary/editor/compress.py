@@ -269,12 +269,13 @@ def compress_text(
                         if review.issues:
                             f.write(f"\n[[ Issues ({len(review.issues)}) ]]\n")
                             for issue in review.issues:
+                                tier = issue.get("tier", "?")
                                 issue_type = issue.get("type", "unknown")
                                 severity = issue.get("severity", "unknown")
                                 description = issue.get("missing_info") or issue.get("problem", "No description")
                                 suggestion = issue.get("suggestion", "")
 
-                                f.write(f"    - [{severity.upper()}] ({issue_type})\n")
+                                f.write(f"    - [TIER {tier}] [{severity.upper()}] ({issue_type})\n")
                                 f.write(f"      Problem: {description}\n")
                                 if suggestion:
                                     f.write(f"      Suggestion: {suggestion}\n")
@@ -380,47 +381,29 @@ def _generate_snake_reviewers(
     """
     snake_reviewers = []
 
-    # Find prompt templates
-    weight_prompt_path = Path(__file__).parent.parent / "data" / "editor" / "thread_weight_evaluator.jinja"
+    # Find prompt template
     info_prompt_path = Path(__file__).parent.parent / "data" / "editor" / "thread_reviewer_generator.jinja"
 
     for snake in topologization.snake_graph:
         print(f"  Processing snake {snake.snake_id}: {snake.first_label} → {snake.last_label}")
 
+        # Read weight from snake data structure
+        weight = snake.weight
+        print(f"    Weight: {weight:.2f}")
+
         # Get chunks for this snake
         chunks = snake.get_chunks()
 
-        # Format chunks for prompts
-        chunks_text = _format_chunks_for_prompt(chunks, topologization)
+        # Format chunks as JSON with complete metadata
+        chunks_json = _format_chunks_as_json(chunks, topologization)
 
-        # Generate weight
-        weight_system_prompt = llm.load_system_prompt(weight_prompt_path)
-        weight_response = llm.request(
-            system_prompt=weight_system_prompt,
-            user_message=f"{intention}\n\n---\n\n{chunks_text}",
-            temperature=0.3,
-        )
-
-        if not weight_response:
-            raise RuntimeError(f"Snake {snake.snake_id} weight generation failed: LLM returned empty response")
-
-        try:
-            weight_json = _extract_json_from_markdown(weight_response)
-            weight_data = json.loads(repair_json(weight_json))
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Snake {snake.snake_id} weight generation failed: JSON parse error - {e}") from e
-
-        try:
-            weight = float(weight_data.get("weight", 0.5))
-            print(f"    Weight: {weight:.2f}")
-        except (ValueError, KeyError) as e:
-            raise RuntimeError(f"Snake {snake.snake_id} weight generation failed: Invalid data format - {e}") from e
-
-        # Generate reviewer info
+        # Generate reviewer strategy
         info_system_prompt = llm.load_system_prompt(info_prompt_path)
+        user_message = f"User's reading intention:\n{intention}\n\n---\n\nThread chunks:\n{chunks_json}"
+
         info_response = llm.request(
             system_prompt=info_system_prompt,
-            user_message=f"{intention}\n\n---\n\n{chunks_text}",
+            user_message=user_message,
             temperature=0.3,
         )
 
@@ -428,7 +411,7 @@ def _generate_snake_reviewers(
             raise RuntimeError(f"Snake {snake.snake_id} reviewer info generation failed: LLM returned empty response")
 
         reviewer_info = info_response.strip()
-        print(f"    Reviewer info generated ({len(reviewer_info)} chars)")
+        print(f"    Reviewer strategy generated ({len(reviewer_info)} chars)")
 
         # Generate simple label
         label = f"{snake.first_label} → {snake.last_label}"
@@ -454,47 +437,33 @@ def _generate_snake_reviewers(
     return snake_reviewers
 
 
-def _format_chunks_for_prompt(chunks: list, topologization: Topologization) -> str:
-    """Format chunks for LLM prompts.
+def _format_chunks_as_json(chunks: list, topologization: Topologization) -> str:
+    """Format chunks as JSON with complete metadata.
 
     Args:
         chunks: List of Chunk objects
         topologization: Topologization object
 
     Returns:
-        Formatted string with chunks and source sentences
+        JSON string with chunks metadata including retention, importance, and source sentences
     """
-    lines = []
-    for i, chunk in enumerate(chunks, 1):
-        lines.append(f"## Chunk {i}")
-        lines.append(f"**Label:** {chunk.label}")
+    chunks_with_metadata = []
+    for chunk in chunks:
+        # Get source sentences
+        source_sentences = [topologization.get_sentence_text(sid) for sid in chunk.sentence_ids]
 
-        # Format retention/importance attributes
-        attrs = []
-        if chunk.retention:
-            attrs.append(f"Retention: {chunk.retention}")
-        if chunk.importance:
-            attrs.append(f"Importance: {chunk.importance}")
-        if attrs:
-            lines.append(f"**Attributes:** {', '.join(attrs)}")
+        chunks_with_metadata.append(
+            {
+                "chunk_id": chunk.id,
+                "label": chunk.label,
+                "content": chunk.content,
+                "retention": chunk.retention,
+                "importance": chunk.importance,
+                "source_sentences": source_sentences,
+            }
+        )
 
-        lines.append(f"**Content:** {chunk.content}")
-        lines.append("")
-
-        # Add source sentences
-        source_sentences = []
-        for sentence_id in chunk.sentence_ids:
-            sentence_text = topologization.get_sentence_text(sentence_id)
-            source_sentences.append(sentence_text)
-
-        lines.append(f"**Source sentences ({len(source_sentences)}):**")
-        for j, sentence in enumerate(source_sentences, 1):
-            lines.append(f"{j}. {sentence}")
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-
-    return "\n".join(lines)
+    return json.dumps(chunks_with_metadata, ensure_ascii=False, indent=2)
 
 
 def _compress_iteration(

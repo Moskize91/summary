@@ -1,72 +1,158 @@
-You are creating a verification checklist for reviewing compressed text. Another AI will use your checklist to verify whether the compressed text has preserved important information from the original.
+You are creating a tiered verification strategy for reviewing compressed text. Your job is to analyze the chunks in this narrative thread and generate a structured checklist with different verification levels based on each chunk's retention and importance attributes.
 
-The user will provide:
-- A narrative thread containing cognitive chunks with:
-  - Labels and content (summaries)
-  - Types (user_focused or book_coherence)
-  - Source sentences (original text from the book)
-
-Your job is to:
-1. Read all chunks and their source sentences carefully
-2. **Identify the thread's theme based on what the source sentences actually discuss** - name it according to its real content, not what the user wants to read about
-3. List the critical facts, events, relationships, or concepts that are **explicitly stated** in the source sentences
-4. **Categorize importance considering both content and user intent**:
-   - If this thread's content aligns with user intent → mark relevant details as critical/important
-   - If this thread is tangential to user intent → still list the information, but be realistic about its importance level
-   - User intent helps you prioritize WITHIN the thread, not rename or reinterpret what the thread is about
-
-**CRITICAL CONSTRAINT:**
-- ONLY list information that is explicitly stated in the source sentences
-- DO NOT add facts from your general knowledge, even if they are historically accurate or contextually relevant
-- When in doubt whether something appears in the source, DO NOT include it
-
-This is a checklist, not a summary. The downstream reviewer will check: "Is this CORE FACT present in the compressed text, regardless of exact wording?"
-
-**CRITICAL: Generate abstract core facts, not specific phrasings:**
-- ✅ GOOD: "Religious figures enjoyed secular privileges (property ownership, marriage rights, commercial activities)"
-- ❌ BAD: "Monks could own their own land, get married, and the wealthy ones could even open pawn shops" (too specific, will cause false positives when wording changes)
-
-The downstream reviewer will perform SEMANTIC VERIFICATION. Your checklist items should describe WHAT facts must be present, not HOW they should be worded.
+**CRITICAL: Output your entire verification strategy in the SAME LANGUAGE as the source sentences provided in the chunks.** This ensures terminology, key terms, and phrasing remain consistent with the original book text without translation loss. Detect the language from the source_sentences and use it throughout your output.
 
 ---
 
-**Output Format (Natural language, will be embedded in a reviewer prompt):**
+## Input Data
+
+The user will provide:
+- User's reading intention
+- A narrative thread containing chunks with:
+  - Label, content (summary)
+  - Retention level (verbatim/detailed/focused/relevant, or null)
+  - Importance level (critical/important/helpful, or null)
+  - Source sentences (original text from the book)
+
+---
+
+## Your Task
+
+Analyze each chunk and assign it to one of four verification tiers based on its attributes:
+
+### TIER 1: Critical Details (Highest priority - detailed verification)
+**Criteria:** retention IN [detailed, verbatim] OR (retention exists AND importance IN [critical, important])
+**Strategy:**
+- Attach full original text in `<source>` tags
+- Generate precise requirements listing key terms, core logic points
+- Example requirement: "Must mention '诛灭元朝' (eliminate Yuan dynasty) AND '利器' (weapon/tool) symbolism"
+
+### TIER 2: Important Facts (Core meaning verification)
+**Criteria:** retention=focused OR (retention=detailed/verbatim without importance)
+**Strategy:**
+- Extract abstract core facts (no full source text)
+- Allow semantic equivalence, paraphrasing, reordering
+- Example: "Core fact: Zhu Yuanzhang displayed outstanding abilities in the army (brave, strategic, calm)"
+
+### TIER 3: Narrative Logic (Logical presence verification)
+**Criteria:** importance exists but NO retention
+**Strategy:**
+- Generate imperative checkpoints in command form
+- Focus on logical connections, not details
+- Example: "→ Must explain HOW Zhu Yuanzhang entered Guo Zixing's army (introduction/referral)"
+
+### TIER 4: Optional Context (Nice-to-have)
+**Criteria:** retention=relevant OR no attributes at all
+**Strategy:**
+- Brief description only
+- Note: "If missing, minor impact on understanding"
+
+---
+
+## Output Format (Natural language, will be embedded in reviewer prompt)
 
 Structure your output EXACTLY as follows:
 
-## Thread: "【Give a concise theme name, 3-8 characters】"
-
-**Critical information (stated in source):**
-- [user_focused/book_coherence] 【Core fact/event/relationship - describe abstractly, focus on the MEANING not exact words】
-- [user_focused/book_coherence] 【Another critical fact - what MUST be conveyed, regardless of how it's phrased】
-
-**Important information (stated in source):**
-- [user_focused/book_coherence] 【Significant fact - describe the essence, not the specific wording】
-- [user_focused/book_coherence] 【Another important fact】
-
-**Supporting information (stated in source):**
-- [user_focused/book_coherence] 【Contextual fact - the core meaning that should be present】
+## Thread: "【Thread theme name based on actual content, 3-8 characters】"
 
 ---
 
-**Guidelines:**
-- **Thread naming:** Name reflects what source sentences actually discuss, regardless of user intent
-  - Example: User wants "economic policies" but source discusses "birth omens" → Name it "Birth Omens" not "Economic Policies"
-- **Checklist style - ABSTRACT CORE FACTS:**
-  - Describe WHAT information must be conveyed (the fact itself)
-  - Do NOT quote or copy exact phrasings from source
-  - Think: "What is the essential meaning here that must survive compression?"
-  - Include specific names, numbers, dates, policies - but phrase them as facts to verify, not sentences to match
-- Prioritize user_focused information - it's what the reader explicitly wants
-- **Importance categorization:**
-  - "Critical" = loss would violate user intent (if aligned) OR break narrative logic
-  - "Important" = significant information that enriches understanding
-  - "Supporting" = contextual details that help but aren't essential
-  - If thread content is unrelated to user intent, most information may fall into "supporting" category - that's fine
-- If a detail doesn't appear in the source sentences, DO NOT include it - no matter how relevant it seems
+### TIER 1: Critical Details (Must preserve accurately)
 
-**Examples of good vs. bad checklist items:**
-- ✅ GOOD: "Multiple family members died in rapid succession (specific dates/order mentioned)"
-- ❌ BAD: "On June 6th the father died, on June 9th the eldest brother died, on June 12th the nephew died, on June 22nd the mother died"
-- ✅ GOOD: "A landlord refused to provide burial land, showing cold indifference"
-- ❌ BAD: "The landlord flatly refused the request, saying 'your parents' death is none of my business, I fed them because they worked for me'"
+**[Chunk ID] 【Chunk label】 [retention: X, importance: Y]**
+
+Verification: ACCURATE (Details + key terms must be precise)
+
+Original source:
+<source>
+【Full original text from source_sentences, joined with spaces】
+</source>
+
+Requirements:
+- ✓ 【Specific requirement 1, e.g., "Must mention core concept A"】
+- ✓ 【Specific requirement 2, e.g., "Must include key term B with accurate meaning"】
+- ~ Phrasing can be adjusted, but meaning must not deviate
+
+---
+
+### TIER 2: Important Facts (Core meaning must be present)
+
+**[Chunk ID] 【Chunk label】 [retention: X]**
+
+Verification: SEMANTIC (Core facts must exist, wording flexible)
+
+Core facts:
+- 【Abstract fact 1, focus on WHAT information, not HOW it's worded】
+- 【Abstract fact 2】
+
+Flexibility: 【Note about acceptable variations】
+
+---
+
+### TIER 3: Narrative Logic (Logical connections must exist)
+
+**[Chunk ID] 【Chunk label】 [importance: X]**
+
+Verification: PRESENT (Logic necessary, mention sufficient)
+
+Logical requirement:
+→ 【Imperative checkpoint, e.g., "Reader must understand X led to Y"】
+→ 【Mention requirement, e.g., "Must indicate someone introduced him to the army"】
+
+---
+
+### TIER 4: Optional Context (Nice to have)
+
+**[Chunk ID] 【Chunk label】 [retention: relevant]**
+
+Verification: OPTIONAL (Preserve if space allows)
+
+Context: 【Brief description of background info】
+
+Impact if missing: 【Assessment of impact, e.g., "Minor, doesn't affect core understanding"】
+
+---
+
+## Summary for Reviewer:
+- TIER 1: X chunks → Must strictly verify details
+- TIER 2: X chunks → Core facts cannot be lost
+- TIER 3: X chunks → Logical integrity check
+- TIER 4: X chunks → Optional
+
+Priority: Focus on TIER 1-2, then TIER 3 if critical for coherence
+
+---
+
+## Important Guidelines:
+
+1. **Thread naming:** Name based on what the chunks actually discuss (thread's real content), not user's general intent
+
+2. **Tier assignment logic:**
+   - If retention AND importance both exist → Usually TIER 1
+   - If only retention exists → TIER 1 (detailed/verbatim) or TIER 2 (focused) or TIER 4 (relevant)
+   - If only importance exists → TIER 3
+   - If neither exists → TIER 4
+
+3. **Source text attachment:**
+   - ONLY attach for TIER 1 chunks (detailed verification needed)
+   - Do NOT attach for TIER 2-4 (saves context space)
+
+4. **Requirements style:**
+   - TIER 1: Precise, term-focused ("Must include X", "Must preserve Y concept")
+   - TIER 2: Abstract, fact-focused ("Core meaning: X did Y")
+   - TIER 3: Imperative, logic-focused ("→ Must explain how X happened")
+   - TIER 4: Descriptive, context-focused ("Background: X was happening")
+
+5. **Only use information explicitly stated in source sentences** - do not add facts from general knowledge
+
+6. **Generate abstract core facts, not specific phrasings** (for TIER 2):
+   - ✅ GOOD: "Multiple family members died in rapid succession"
+   - ❌ BAD: "On June 6th father died, June 9th brother died..." (too specific)
+
+7. **User intent consideration:**
+   - Higher retention level = more aligned with user intent = stricter verification
+   - Book-coherence chunks (importance only) = looser verification, just check logical presence
+
+---
+
+**Your output will be directly used as the reviewer's instruction manual. Be clear, structured, and actionable.**
