@@ -183,11 +183,8 @@ class SnakeDetector:
            - Get all edges (in+out) connected to node
            - Compute link strength ratio for current edge
            - Half-weight = node_weight * link_strength_ratio
-        2. Edge base weight = sum of two half-weights
-        3. Apply modifiers:
-           - If both nodes have retention: multiply by 3
-           - If both nodes have importance: multiply by 3 (can stack)
-        4. Ensure minimum weight of 0.1 to allow ink diffusion even without attributes
+        2. Edge weight = sum of two half-weights
+        3. Ensure minimum weight of 0.1 to allow ink diffusion even without attributes
 
         Args:
             graph: NetworkX graph with node and edge attributes
@@ -228,23 +225,11 @@ class SnakeDetector:
 
             v_half_weight = node_weights[v] * (edge_link_strength / v_total_strength if v_total_strength > 0 else 0)
 
-            # Base weight
-            base_weight = u_half_weight + v_half_weight
-
-            # Apply modifiers
-            modifier = 1.0
-            u_data = graph.nodes[u]
-            v_data = graph.nodes[v]
-
-            if u_data.get("retention") and v_data.get("retention"):
-                modifier *= 3.0
-            if u_data.get("importance") and v_data.get("importance"):
-                modifier *= 3.0
-
-            final_weight = base_weight * modifier
+            # Edge weight = sum of two half-weights
+            edge_weight = u_half_weight + v_half_weight
 
             # Ensure minimum weight for ink diffusion
-            final_weight = max(final_weight, MIN_EDGE_WEIGHT)
+            final_weight = max(edge_weight, MIN_EDGE_WEIGHT)
 
             # Store for both directions (undirected for weight purposes)
             edge_weights[(u, v)] = final_weight
@@ -363,37 +348,83 @@ class SnakeDetector:
 
         print(f"  ✓ Validated: All {len(fingerprints)} nodes have identical structure ({len(reference_nodes)} nodes)")
 
-    def _compute_distance(self, cluster1: list[int], cluster2: list[int], fingerprints: dict[int, dict]) -> float:
-        """Compute distance as the diameter of merged cluster.
+    def _compute_merge_value(
+        self,
+        graph: nx.DiGraph,
+        cluster1: list[int],
+        cluster2: list[int],
+        fingerprints: dict[int, dict],
+    ) -> float:
+        """Compute merge value for two clusters based on their connecting edges.
 
-        Distance = maximum pairwise distance within the merged cluster.
-        This creates self-correction: loose clusters have large diameter and won't easily merge.
+        Value = minimum edge value among all connecting edges between clusters.
+        Edge value = (1 - d/2.0) * dv
+        where:
+        - d: Euclidean distance between node fingerprints (range: 0.0 to 2.0 for unit vectors)
+        - dv: link_strength + (3 if both nodes have retention) + (3 if both have importance)
+
+        Taking minimum ensures that the weakest connection determines merge priority.
+        Higher values indicate better merge candidates (closer distance, stronger links).
 
         Args:
+            graph: NetworkX graph with node/edge attributes
             cluster1: First cluster nodes
             cluster2: Second cluster nodes
             fingerprints: Node fingerprints (dict mapping node_id to concentration dict)
 
         Returns:
-            Maximum distance between any two nodes in merged cluster (diameter)
+            Merge value (higher is better, range 0.0 to 15.0)
         """
-        # Simulate merge
-        merged = cluster1 + cluster2
+        min_value = float("inf")
+        edge_count = 0
 
-        # Find maximum pairwise distance (diameter)
-        max_distance = 0.0
-        for i, node_i in enumerate(merged):
-            for node_j in merged[i + 1 :]:  # Avoid duplicate pairs
-                # Euclidean distance between fingerprints
+        # Enumerate all edges between the two clusters
+        for u in cluster1:
+            for v in cluster2:
+                # Check if edge exists (either direction)
+                edge_data = None
+                if graph.has_edge(u, v):
+                    edge_data = graph.edges[u, v]
+                elif graph.has_edge(v, u):
+                    edge_data = graph.edges[v, u]
+
+                if edge_data is None:
+                    continue
+
+                edge_count += 1
+
+                # Compute distance d between fingerprints (Euclidean distance)
                 squared_sum = 0.0
-                for target_node in fingerprints[node_i]:  # All nodes have same structure
-                    diff = fingerprints[node_i][target_node] - fingerprints[node_j][target_node]
+                for target_node in fingerprints[u]:  # All nodes have same structure
+                    diff = fingerprints[u][target_node] - fingerprints[v][target_node]
                     squared_sum += diff * diff
+                d = squared_sum**0.5
 
-                distance = squared_sum**0.5
-                max_distance = max(max_distance, distance)
+                # Compute dv (bonus value from link strength and node attributes)
+                strength_str = edge_data.get("strength")
+                link_strength = LinkStrength.from_string(strength_str)
+                dv = float(link_strength.value) if link_strength else 1.0
 
-        return max_distance
+                # Add bonuses for node attributes
+                u_data = graph.nodes[u]
+                v_data = graph.nodes[v]
+
+                if u_data.get("retention") and v_data.get("retention"):
+                    dv += 3.0
+                if u_data.get("importance") and v_data.get("importance"):
+                    dv += 3.0
+
+                # Compute edge value: v = (1 - d/2.0) * dv
+                base_value = 1.0 - d / 2.0
+                value = base_value * dv
+
+                min_value = min(min_value, value)
+
+        # If no connecting edges found, return very low value
+        if edge_count == 0:
+            return -float("inf")
+
+        return min_value
 
     def _greedy_merge(
         self,
@@ -442,8 +473,8 @@ class SnakeDetector:
                 if not self._clusters_connected(graph, clusters[cluster_u], clusters[cluster_v]):
                     continue
 
-                dist = self._compute_distance(clusters[cluster_u], clusters[cluster_v], fingerprints)
-                value = -dist  # Negative distance for max heap
+                merge_value = self._compute_merge_value(graph, clusters[cluster_u], clusters[cluster_v], fingerprints)
+                value = merge_value
 
                 heapq.heappush(edge_heap, (-value, (cluster_u, cluster_v)))
                 edge_set.add((cluster_u, cluster_v))
@@ -493,9 +524,11 @@ class SnakeDetector:
                 if neighbor_cluster is None or neighbor_cluster == cluster_u:
                     continue
 
-                # Compute new distance
-                new_dist = self._compute_distance(clusters[cluster_u], clusters[neighbor_cluster], fingerprints)
-                new_value = -new_dist
+                # Compute new merge value
+                new_merge_value = self._compute_merge_value(
+                    graph, clusters[cluster_u], clusters[neighbor_cluster], fingerprints
+                )
+                new_value = new_merge_value
 
                 # Add to heap
                 if cluster_u < neighbor_cluster:

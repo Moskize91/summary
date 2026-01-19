@@ -86,7 +86,7 @@ def main(args: list[str] | None = None) -> int:
     parser.add_argument(
         "--decay-factor",
         type=float,
-        default=0.68,
+        default=0.5,
         help="Generation decay factor for Wave Reflection (0-1)",
     )
 

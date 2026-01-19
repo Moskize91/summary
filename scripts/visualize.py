@@ -65,7 +65,7 @@ def main():
     # Note: We need to manually load content for visualization
     graph_data = {
         "nodes": [],
-        "edges": [{"from": u, "to": v} for u, v in graph.edges()],
+        "edges": [{"from": u, "to": v, "strength": data.get("strength")} for u, v, data in graph.edges(data=True)],
     }
 
     # Load content from Topologization for each node
