@@ -17,7 +17,7 @@ class WaveReflection:
     Edge direction: always from later chunks to earlier chunks (based on sentence_id).
     """
 
-    def __init__(self, generation_decay_factor: float = 0.9):
+    def __init__(self, generation_decay_factor: float):
         """Initialize Wave Reflection algorithm.
 
         Args:

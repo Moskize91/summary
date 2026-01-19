@@ -13,16 +13,20 @@ Phase 2: Snake Merging (Allow Snake Eating Snake)
 
 Design Principles:
 1. Input MUST be a weakly connected graph (use split_connected_components first)
-2. All nodes have fingerprints with IDENTICAL structure (same edges) but DIFFERENT values
-3. Fingerprint values are distances from node to each edge (ink diffusion without decay)
+2. All nodes have fingerprints with IDENTICAL structure (same nodes) but DIFFERENT values
+3. Fingerprint values are normalized ink concentrations from node to all other nodes
 4. Distance metric is the diameter of merged cluster (maximum pairwise distance)
 5. Diameter-based distance creates natural self-correction without artificial limits
+6. Edge weights based on node attributes (retention/importance) and link strength
+7. Ink flows from source node through weighted edges to all nodes (BFS, treating edges as undirected)
 """
 
 import heapq
 from dataclasses import dataclass
 
 import networkx as nx
+
+from .enums import ImportanceLevel, LinkStrength, RetentionLevel
 
 
 def split_connected_components(graph: nx.DiGraph) -> list[nx.DiGraph]:
@@ -136,70 +140,228 @@ class SnakeDetector:
 
         return snakes
 
-    def _compute_all_fingerprints(self, graph: nx.DiGraph) -> dict[int, dict]:
-        """Compute fingerprints for all nodes.
+    def _compute_node_weights(self, graph: nx.DiGraph) -> dict[int, float]:
+        """Compute weight for each node based on retention and importance.
 
-        Each fingerprint is a dict mapping edges to distances from the node.
-        - All fingerprints contain the same edges (structure identical)
-        - But distance values differ based on node position in graph
-        - Ink diffusion without decay: distance = shortest path to edge
+        Node weight = retention_value + importance_value
+        - Both attributes are optional, use value if present
 
         Args:
-            graph: NetworkX graph
+            graph: NetworkX graph with node attributes
 
         Returns:
-            Dict mapping node_id to fingerprint dict {edge: distance}
+            Dict mapping node_id to weight
         """
-        # Convert to undirected for distance calculation
-        undirected = graph.to_undirected()
+        node_weights = {}
+        for node in graph.nodes():
+            node_data = graph.nodes[node]
+            weight = 0.0
+
+            # Add retention value if present
+            retention_str = node_data.get("retention")
+            if retention_str:
+                retention = RetentionLevel.from_string(retention_str)
+                if retention:
+                    weight += float(retention.value)
+
+            # Add importance value if present
+            importance_str = node_data.get("importance")
+            if importance_str:
+                importance = ImportanceLevel.from_string(importance_str)
+                if importance:
+                    weight += float(importance.value)
+
+            node_weights[node] = weight
+
+        return node_weights
+
+    def _compute_edge_weights(self, graph: nx.DiGraph) -> dict[tuple, float]:
+        """Compute weight for each edge based on node weights and link strength.
+
+        Edge weight calculation:
+        1. Compute half-weight for each endpoint node:
+           - Get all edges (in+out) connected to node
+           - Compute link strength ratio for current edge
+           - Half-weight = node_weight * link_strength_ratio
+        2. Edge base weight = sum of two half-weights
+        3. Apply modifiers:
+           - If both nodes have retention: multiply by 3
+           - If both nodes have importance: multiply by 3 (can stack)
+        4. Ensure minimum weight of 0.1 to allow ink diffusion even without attributes
+
+        Args:
+            graph: NetworkX graph with node and edge attributes
+
+        Returns:
+            Dict mapping (u, v) edge tuple to weight (undirected, both orders)
+        """
+        node_weights = self._compute_node_weights(graph)
+        edge_weights = {}
+
+        # Minimum edge weight to ensure diffusion even without node attributes
+        MIN_EDGE_WEIGHT = 0.1
+
+        # Process each edge (treat as undirected for weight computation)
+        for u, v in graph.edges():
+            edge_data = graph.edges[u, v]
+            strength_str = edge_data.get("strength")
+            link_strength = LinkStrength.from_string(strength_str)
+            edge_link_strength = float(link_strength.value) if link_strength else 1.0
+
+            # Compute half-weight for node u
+            u_edges = list(graph.in_edges(u)) + list(graph.out_edges(u))
+            u_total_strength = 0.0
+            for edge in u_edges:
+                edge_data_u = graph.edges[edge]
+                strength_u = LinkStrength.from_string(edge_data_u.get("strength"))
+                u_total_strength += float(strength_u.value) if strength_u else 1.0
+
+            u_half_weight = node_weights[u] * (edge_link_strength / u_total_strength if u_total_strength > 0 else 0)
+
+            # Compute half-weight for node v
+            v_edges = list(graph.in_edges(v)) + list(graph.out_edges(v))
+            v_total_strength = 0.0
+            for edge in v_edges:
+                edge_data_v = graph.edges[edge]
+                strength_v = LinkStrength.from_string(edge_data_v.get("strength"))
+                v_total_strength += float(strength_v.value) if strength_v else 1.0
+
+            v_half_weight = node_weights[v] * (edge_link_strength / v_total_strength if v_total_strength > 0 else 0)
+
+            # Base weight
+            base_weight = u_half_weight + v_half_weight
+
+            # Apply modifiers
+            modifier = 1.0
+            u_data = graph.nodes[u]
+            v_data = graph.nodes[v]
+
+            if u_data.get("retention") and v_data.get("retention"):
+                modifier *= 3.0
+            if u_data.get("importance") and v_data.get("importance"):
+                modifier *= 3.0
+
+            final_weight = base_weight * modifier
+
+            # Ensure minimum weight for ink diffusion
+            final_weight = max(final_weight, MIN_EDGE_WEIGHT)
+
+            # Store for both directions (undirected for weight purposes)
+            edge_weights[(u, v)] = final_weight
+            edge_weights[(v, u)] = final_weight
+
+        return edge_weights
+
+    def _compute_all_fingerprints(self, graph: nx.DiGraph) -> dict[int, dict]:
+        """Compute fingerprints for all nodes using weighted ink diffusion with decay.
+
+        Each fingerprint is a dict mapping nodes to normalized ink concentrations.
+        - Ink starts from source node (concentration 1.0)
+        - Flows through weighted edges to all other nodes (treating edges as undirected)
+        - Each generation (BFS layer) applies decay factor: concentration × 0.65
+        - Each node can only be colored once (BFS layer-by-layer)
+        - Nodes in same layer can receive ink from multiple sources (cumulative)
+        - After all nodes are colored, normalize concentrations to sum=1.0
+
+        Args:
+            graph: NetworkX graph with node/edge attributes
+
+        Returns:
+            Dict mapping node_id to fingerprint dict {target_node_id: normalized_concentration}
+        """
+        # Decay factor applied per generation (BFS layer)
+        DECAY_FACTOR = 0.75
+
+        edge_weights = self._compute_edge_weights(graph)
 
         fingerprints = {}
-        for node in graph.nodes():
-            # BFS from this node to get shortest path distances
-            distances = nx.single_source_shortest_path_length(undirected, node)
+        for start_node in graph.nodes():
+            # BFS with weighted ink diffusion
+            concentrations = {start_node: 1.0}
+            current_layer = [start_node]
+            visited = {start_node}
 
-            # Build fingerprint: {edge: distance_to_edge}
-            fp = {}
-            for u, v in graph.edges():
-                edge = frozenset([u, v])
-                # Distance to edge = min distance to either endpoint
-                dist_to_edge = min(
-                    distances.get(u, float("inf")),
-                    distances.get(v, float("inf")),
-                )
-                fp[edge] = dist_to_edge
+            while current_layer:
+                next_layer_nodes = {}  # {node: cumulative_concentration}
 
-            fingerprints[node] = fp
+                for current_node in current_layer:
+                    current_concentration = concentrations[current_node]
+
+                    # Find all unvisited neighbors (treat graph as undirected)
+                    neighbors = []
+                    total_weight = 0.0
+
+                    # Check in_edges (predecessors)
+                    for predecessor, _ in graph.in_edges(current_node):
+                        if predecessor not in visited:
+                            # Edge weight is symmetric (undirected)
+                            weight = edge_weights.get(
+                                (predecessor, current_node), edge_weights.get((current_node, predecessor), 1.0)
+                            )
+                            neighbors.append((predecessor, weight))
+                            total_weight += weight
+
+                    # Check out_edges (successors)
+                    for _, successor in graph.out_edges(current_node):
+                        if successor not in visited:
+                            weight = edge_weights.get(
+                                (current_node, successor), edge_weights.get((successor, current_node), 1.0)
+                            )
+                            neighbors.append((successor, weight))
+                            total_weight += weight
+
+                    # Distribute concentration proportionally by edge weights with decay
+                    if total_weight > 0:
+                        for neighbor, weight in neighbors:
+                            contribution = current_concentration * (weight / total_weight) * DECAY_FACTOR
+                            if neighbor not in next_layer_nodes:
+                                next_layer_nodes[neighbor] = 0.0
+                            next_layer_nodes[neighbor] += contribution
+
+                # Add next layer nodes to concentrations and visited set
+                for node, concentration in next_layer_nodes.items():
+                    concentrations[node] = concentration
+                    visited.add(node)
+
+                current_layer = list(next_layer_nodes.keys())
+
+            # Normalize concentrations (sum to 1.0)
+            total = sum(concentrations.values())
+            if total > 0:
+                for node in concentrations:
+                    concentrations[node] /= total
+
+            fingerprints[start_node] = concentrations
 
         return fingerprints
 
     def _validate_fingerprints(self, fingerprints: dict[int, dict]) -> None:
-        """Validate that all fingerprints have the same structure (same edges).
+        """Validate that all fingerprints have the same structure (same nodes).
 
         Args:
             fingerprints: Dict of node fingerprints
 
         Raises:
-            AssertionError: If fingerprints don't have the same edge set
+            AssertionError: If fingerprints don't have the same node set
         """
         if not fingerprints:
             return
 
-        # Get reference edge set
+        # Get reference node set
         first_node = next(iter(fingerprints))
-        reference_edges = set(fingerprints[first_node].keys())
+        reference_nodes = set(fingerprints[first_node].keys())
 
-        # Check all others have the same edges (but can have different distances)
+        # Check all others have the same nodes (but can have different concentrations)
         for node, fp in fingerprints.items():
-            node_edges = set(fp.keys())
-            if node_edges != reference_edges:
+            fp_nodes = set(fp.keys())
+            if fp_nodes != reference_nodes:
                 raise AssertionError(
-                    f"Fingerprint structure mismatch! Node {node} has different edges. "
-                    f"Expected {len(reference_edges)} edges, got {len(node_edges)} edges. "
+                    f"Fingerprint structure mismatch! Node {node} has different nodes. "
+                    f"Expected {len(reference_nodes)} nodes, got {len(fp_nodes)} nodes. "
                     "This should never happen in a connected graph."
                 )
 
-        print(f"  ✓ Validated: All {len(fingerprints)} nodes have identical structure ({len(reference_edges)} edges)")
+        print(f"  ✓ Validated: All {len(fingerprints)} nodes have identical structure ({len(reference_nodes)} nodes)")
 
     def _compute_distance(self, cluster1: list[int], cluster2: list[int], fingerprints: dict[int, dict]) -> float:
         """Compute distance as the diameter of merged cluster.
@@ -210,8 +372,7 @@ class SnakeDetector:
         Args:
             cluster1: First cluster nodes
             cluster2: Second cluster nodes
-            graph: Original graph (unused, kept for compatibility)
-            fingerprints: Node fingerprints
+            fingerprints: Node fingerprints (dict mapping node_id to concentration dict)
 
         Returns:
             Maximum distance between any two nodes in merged cluster (diameter)
@@ -225,8 +386,8 @@ class SnakeDetector:
             for node_j in merged[i + 1 :]:  # Avoid duplicate pairs
                 # Euclidean distance between fingerprints
                 squared_sum = 0.0
-                for edge in fingerprints[node_i]:  # All nodes have same edges
-                    diff = fingerprints[node_i][edge] - fingerprints[node_j][edge]
+                for target_node in fingerprints[node_i]:  # All nodes have same structure
+                    diff = fingerprints[node_i][target_node] - fingerprints[node_j][target_node]
                     squared_sum += diff * diff
 
                 distance = squared_sum**0.5

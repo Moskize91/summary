@@ -10,10 +10,10 @@ class RetentionLevel(IntEnum):
     Values are designed to support future weight calculations.
     """
 
+    VERBATIM = 27  # Entire passages preserved word-for-word
+    DETAILED = 9  # Complete information retained without compression
+    FOCUSED = 3  # User's primary interest (can be moderately summarized)
     RELEVANT = 1  # User finds this useful but not essential (can be dropped if needed)
-    FOCUSED = 2  # User's primary interest (can be moderately summarized)
-    DETAILED = 3  # Complete information retained without compression
-    VERBATIM = 4  # Entire passages preserved word-for-word
 
     @classmethod
     def from_string(cls, value: str | None) -> "RetentionLevel | None":
@@ -65,9 +65,9 @@ class ImportanceLevel(IntEnum):
     Values are designed to support future weight calculations.
     """
 
+    CRITICAL = 9  # Essential setup, major turning points, or causal links
+    IMPORTANT = 3  # Key context, definitions, or transitions
     HELPFUL = 1  # Supplementary background or minor connective tissue
-    IMPORTANT = 2  # Key context, definitions, or transitions
-    CRITICAL = 3  # Essential setup, major turning points, or causal links
 
     @classmethod
     def from_string(cls, value: str | None) -> "ImportanceLevel | None":
@@ -117,9 +117,9 @@ class LinkStrength(IntEnum):
     Values are designed to support future weight calculations.
     """
 
+    CRITICAL = 9  # Must understand FROM to understand TO
+    IMPORTANT = 3  # FROM provides essential context for TO
     HELPFUL = 1  # FROM and TO are related but both can stand alone
-    IMPORTANT = 2  # FROM provides essential context for TO
-    CRITICAL = 3  # Must understand FROM to understand TO
 
     @classmethod
     def from_string(cls, value: str | None) -> "LinkStrength | None":

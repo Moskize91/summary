@@ -27,7 +27,7 @@ class TopologizationConfig:
     max_fragment_tokens: int = 800
     batch_size: int = 50000
     working_memory_capacity: int = 7
-    generation_decay_factor: float = 0.75
+    generation_decay_factor: float = 0.5
     max_chunks: int | None = None  # None for unlimited
 
     # Snake detection parameters
