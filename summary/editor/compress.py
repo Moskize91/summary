@@ -9,7 +9,7 @@ from pathlib import Path
 from json_repair import repair_json
 
 from ..llm import LLM
-from ..topologization.api import ChunkType, Topologization
+from ..topologization.api import Topologization
 
 
 def _extract_json_from_markdown(text: str) -> str:
@@ -447,7 +447,7 @@ def _generate_snake_reviewers(
     if total_weight > 0:
         for sr in snake_reviewers:
             sr.weight = sr.weight / total_weight
-        print(f"\n  Normalized weights (sum = 1.0):")
+        print("\n  Normalized weights (sum = 1.0):")
         for sr in snake_reviewers:
             print(f"    Snake {sr.snake_id}: {sr.weight:.3f}")
 
@@ -466,10 +466,18 @@ def _format_chunks_for_prompt(chunks: list, topologization: Topologization) -> s
     """
     lines = []
     for i, chunk in enumerate(chunks, 1):
-        chunk_type = "user_focused" if chunk.type == ChunkType.USER_FOCUSED else "book_coherence"
         lines.append(f"## Chunk {i}")
         lines.append(f"**Label:** {chunk.label}")
-        lines.append(f"**Type:** {chunk_type}")
+
+        # Format retention/importance attributes
+        attrs = []
+        if chunk.retention:
+            attrs.append(f"Retention: {chunk.retention}")
+        if chunk.importance:
+            attrs.append(f"Importance: {chunk.importance}")
+        if attrs:
+            lines.append(f"**Attributes:** {', '.join(attrs)}")
+
         lines.append(f"**Content:** {chunk.content}")
         lines.append("")
 

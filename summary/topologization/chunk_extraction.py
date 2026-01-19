@@ -110,7 +110,7 @@ class ChunkExtractor:
         system_prompt = self.llm.load_system_prompt(
             self.book_coherence_template,
             user_focused_chunks=user_focused_for_template,
-            working_memory=working_memory.format_for_prompt(),
+            working_memory=working_memory.format_for_prompt(include_current_fragment=False),
         )
 
         # Call LLM
@@ -154,13 +154,14 @@ class ChunkExtractor:
         """
         # Parse JSON response
         try:
-            parsed_data = self._parse_json_response(response)
+            parsed_data = self._parse_json_response(response, expected_type)
 
-            # Check if order is correct (chunks before links)
-            order_correct = self._check_json_order(response)
+            # Check if order is correct
+            order_correct = self._check_json_order(response, expected_type)
 
             chunks_data = parsed_data.get("chunks", [])
             links_data = parsed_data.get("links", [])
+            importance_annotations = parsed_data.get("importance_annotations")  # Only present in Stage 2
 
             chunks = []
             temp_ids = []
@@ -200,10 +201,6 @@ class ChunkExtractor:
                 # Use first matched sentence ID as primary sentence_id (for sorting)
                 primary_sentence_id = matched_sentence_ids[0]
 
-                # Parse type field (should match expected_type)
-                chunk_type_str = data.get("type", expected_type)
-                chunk_type = 1 if chunk_type_str == "user_focused" else 2
-
                 # Extract metadata (retention or importance)
                 retention = data.get("retention") if metadata_field == "retention" else None
                 importance = data.get("importance") if metadata_field == "importance" else None
@@ -215,7 +212,6 @@ class ChunkExtractor:
                     sentence_ids=matched_sentence_ids,  # Store all matched sentence IDs
                     label=data.get("label", ""),
                     content=data.get("content", ""),
-                    chunk_type=chunk_type,
                     links=[],  # Will be populated after ID assignment
                     retention=retention,
                     importance=importance,
@@ -228,6 +224,7 @@ class ChunkExtractor:
                 temp_ids=temp_ids,
                 links=links_data,  # Keep strength field from LLM
                 order_correct=order_correct,
+                importance_annotations=importance_annotations,
             )
 
         except (json.JSONDecodeError, ValueError, KeyError) as e:
@@ -235,16 +232,18 @@ class ChunkExtractor:
             print(f"Response was: {response[:200]}...")
             return None
 
-    def _parse_json_response(self, response: str) -> dict:
+    def _parse_json_response(self, response: str, expected_type: str) -> dict:
         """Parse JSON from LLM response.
 
         Handles cases where LLM includes extra text around JSON.
 
         Args:
             response: LLM response text
+            expected_type: Expected chunk type ("user_focused" or "book_coherence")
 
         Returns:
             Parsed JSON data as dict with "chunks" and "links" keys
+            (and "importance_annotations" for book_coherence)
         """
         # Try to extract JSON object from response
         # Look for JSON object pattern
@@ -253,31 +252,52 @@ class ChunkExtractor:
             json_str = json_match.group(0)
             parsed = json.loads(json_str)
 
-            # Ensure keys exist and enforce order
-            if "chunks" not in parsed or "links" not in parsed:
-                raise ValueError("Missing 'chunks' or 'links' in response")
+            # For user_focused: ensure chunks and links exist
+            if expected_type == "user_focused":
+                if "chunks" not in parsed or "links" not in parsed:
+                    raise ValueError("Missing 'chunks' or 'links' in user_focused response")
+                return {
+                    "chunks": parsed["chunks"],
+                    "links": parsed["links"],
+                }
+            # For book_coherence: ensure importance_annotations, chunks, and links exist
+            else:
+                if "importance_annotations" not in parsed or "chunks" not in parsed or "links" not in parsed:
+                    raise ValueError(
+                        "Missing 'importance_annotations', 'chunks', or 'links' in book_coherence response"
+                    )
+                return {
+                    "importance_annotations": parsed["importance_annotations"],
+                    "chunks": parsed["chunks"],
+                    "links": parsed["links"],
+                }
 
-            # Return with enforced key order (Python 3.7+ preserves insertion order)
+        # If no object found, try parsing the whole response
+        parsed = json.loads(response)
+        if expected_type == "user_focused":
             return {
                 "chunks": parsed["chunks"],
                 "links": parsed["links"],
             }
+        else:
+            return {
+                "importance_annotations": parsed["importance_annotations"],
+                "chunks": parsed["chunks"],
+                "links": parsed["links"],
+            }
 
-        # If no object found, try parsing the whole response
-        parsed = json.loads(response)
-        return {
-            "chunks": parsed["chunks"],
-            "links": parsed["links"],
-        }
+    def _check_json_order(self, response: str, expected_type: str) -> bool:
+        """Check if JSON keys appear in correct order.
 
-    def _check_json_order(self, response: str) -> bool:
-        """Check if JSON keys appear in correct order (chunks before links).
+        For user_focused: chunks before links
+        For book_coherence: importance_annotations before chunks before links
 
         Args:
             response: Raw LLM response text
+            expected_type: Expected chunk type ("user_focused" or "book_coherence")
 
         Returns:
-            True if chunks appears before links, False otherwise
+            True if keys are in correct order, False otherwise
         """
         # Extract the JSON portion
         json_match = re.search(r"\{[\s\S]*\}", response)
@@ -287,14 +307,25 @@ class ChunkExtractor:
         else:
             json_str = json_match.group(0)
 
-        # Find positions of "chunks" and "links" keys in the raw JSON string
-        chunks_pos = json_str.find('"chunks"')
-        links_pos = json_str.find('"links"')
+        if expected_type == "user_focused":
+            # Find positions of "chunks" and "links" keys
+            chunks_pos = json_str.find('"chunks"')
+            links_pos = json_str.find('"links"')
 
-        if chunks_pos == -1 or links_pos == -1:
-            return False
+            if chunks_pos == -1 or links_pos == -1:
+                return False
 
-        return chunks_pos < links_pos
+            return chunks_pos < links_pos
+        else:
+            # For book_coherence: check importance_annotations -> chunks -> links
+            importance_pos = json_str.find('"importance_annotations"')
+            chunks_pos = json_str.find('"chunks"')
+            links_pos = json_str.find('"links"')
+
+            if importance_pos == -1 or chunks_pos == -1 or links_pos == -1:
+                return False
+
+            return importance_pos < chunks_pos < links_pos
 
     def _fuzzy_match_sentence(
         self,

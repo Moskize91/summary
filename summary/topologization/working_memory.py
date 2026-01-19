@@ -36,9 +36,6 @@ class WorkingMemory:
         Returns:
             Tuple of (added_chunks, edges) where edges is list of (from_id, to_id) tuples
         """
-        # Increment generation first
-        self._generation += 1
-
         # Create temp_id to chunk mapping
         temp_id_map = {}
 
@@ -95,16 +92,12 @@ class WorkingMemory:
                     print(f"Warning: Working memory ID {to_ref} not found")
                     continue
 
-            # Normalize edge direction: always from later to earlier (based on sentence_id)
-            # If sentence_id is the same, use chunk.id as tiebreaker
-            if from_chunk.sentence_id > to_chunk.sentence_id or (
-                from_chunk.sentence_id == to_chunk.sentence_id and from_chunk.id > to_chunk.id
-            ):
-                # from is later, to is earlier: edge should be from -> to (correct direction)
+            # Normalize edge direction: always from larger ID to smaller ID
+            # AI's link direction is ignored - only the existence of the link matters
+            if from_chunk.id > to_chunk.id:
                 edge_from_id = from_chunk.id
                 edge_to_id = to_chunk.id
             else:
-                # to is later, from is earlier: reverse edge direction
                 edge_from_id = to_chunk.id
                 edge_to_id = from_chunk.id
 
@@ -146,6 +139,10 @@ class WorkingMemory:
         """
         finished_chunks = self._current_fragment_chunks.copy()
         self._current_fragment_chunks = []
+
+        # Increment generation for next fragment
+        self._generation += 1
+
         return finished_chunks
 
     def get_chunks(self) -> list[CognitiveChunk]:
@@ -164,13 +161,21 @@ class WorkingMemory:
         """
         return self._current_fragment_chunks.copy()
 
-    def format_for_prompt(self) -> str:
+    def format_for_prompt(self, include_current_fragment: bool = True) -> str:
         """Format chunks for LLM prompt.
+
+        Args:
+            include_current_fragment: If True, include current fragment chunks.
+                                     If False, only show extra chunks from history.
 
         Returns:
             Formatted string representation with [label] - content format
         """
-        chunks = self.get_chunks()
+        if include_current_fragment:
+            chunks = self.get_chunks()
+        else:
+            chunks = self._extra_chunks
+
         if not chunks:
             return "(empty)"
 

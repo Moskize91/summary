@@ -22,7 +22,7 @@ def create_schema(conn: sqlite3.Connection):
             fragment_id INTEGER NOT NULL,
             sentence_index INTEGER NOT NULL,
             label TEXT NOT NULL,
-            type INTEGER NOT NULL,
+            content TEXT NOT NULL,
             retention TEXT,
             importance TEXT
         )
@@ -100,7 +100,7 @@ def insert_chunk(
     generation: int,
     sentence_id: SentenceId,
     label: str,
-    chunk_type: int,
+    content: str,
     sentence_ids: list[SentenceId],
     retention: str | None = None,
     importance: str | None = None,
@@ -113,10 +113,10 @@ def insert_chunk(
         generation: Generation number
         sentence_id: Primary sentence ID (usually min sentence)
         label: Chunk label
-        chunk_type: Type of chunk (1=user_focused, 2=book_coherence)
+        content: AI-generated summary content
         sentence_ids: All sentence IDs comprising this chunk's content
-        retention: Retention level for user_focused chunks (verbatim/detailed/focused/relevant)
-        importance: Importance level for book_coherence chunks (critical/important/helpful)
+        retention: Retention level (verbatim/detailed/focused/relevant)
+        importance: Importance level (critical/important/helpful)
     """
     cursor = conn.cursor()
 
@@ -124,10 +124,10 @@ def insert_chunk(
     fragment_id, sentence_index = sentence_id
     cursor.execute(
         """
-        INSERT INTO chunks (id, generation, fragment_id, sentence_index, label, type, retention, importance)
+        INSERT INTO chunks (id, generation, fragment_id, sentence_index, label, content, retention, importance)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (chunk_id, generation, fragment_id, sentence_index, label, chunk_type, retention, importance),
+        (chunk_id, generation, fragment_id, sentence_index, label, content, retention, importance),
     )
 
     # Insert chunk-sentence associations

@@ -5,7 +5,7 @@ from pathlib import Path
 import networkx as nx
 
 from dev.visualize_snakes import visualize_snakes
-from summary.topologization import ChunkType, Topologization
+from summary.topologization import Topologization
 
 
 def main():
@@ -36,7 +36,6 @@ def main():
             generation=chunk.generation,
             sentence_id=chunk.sentence_id,
             label=chunk.label,
-            type=chunk.type,
             retention=chunk.retention,
             importance=chunk.importance,
             # Don't add content to save memory
@@ -72,11 +71,14 @@ def main():
     # Load content from Topologization for each node
     for node_id, data in graph.nodes(data=True):
         chunk = topo.get_chunk(node_id)
-        # Format type as readable string
-        type_str = "user_focused" if chunk.type == ChunkType.USER_FOCUSED else "book_coherence"
 
-        # Format retention/importance
-        metadata_str = chunk.retention if chunk.retention else chunk.importance
+        # Format retention/importance for display
+        attrs = []
+        if chunk.retention:
+            attrs.append(f"retention:{chunk.retention}")
+        if chunk.importance:
+            attrs.append(f"importance:{chunk.importance}")
+        metadata_str = ", ".join(attrs) if attrs else ""
 
         graph_data["nodes"].append(
             {
@@ -84,11 +86,10 @@ def main():
                 "generation": data.get("generation", 0),
                 "sentence_id": data.get("sentence_id", (0, 0)),
                 "label": data.get("label", ""),
-                "type": type_str,
                 "retention": chunk.retention,
                 "importance": chunk.importance,
                 "metadata": metadata_str,  # For easy display
-                "content": chunk.content,  # Lazy-loaded from fragments
+                "content": chunk.content,  # AI-generated summary from database
             }
         )
 

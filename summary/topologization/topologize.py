@@ -27,7 +27,7 @@ class TopologizationConfig:
     max_fragment_tokens: int = 800
     batch_size: int = 50000
     working_memory_capacity: int = 7
-    generation_decay_factor: float = 0.68
+    generation_decay_factor: float = 0.75
     max_chunks: int | None = None  # None for unlimited
 
     # Snake detection parameters
@@ -239,7 +239,9 @@ def _extract_knowledge_graph(
 
         # Add user-focused edges to knowledge graph with strength
         for from_id, to_id in user_focused_edges:
-            strength = _find_edge_strength(user_focused_result.links, from_id, to_id, user_focused_chunks, user_focused_result.temp_ids)
+            strength = _find_edge_strength(
+                user_focused_result.links, from_id, to_id, user_focused_chunks, user_focused_result.temp_ids
+            )
             knowledge_graph.add_edge(from_id, to_id, strength=strength)
 
         all_chunks.extend(user_focused_chunks)
@@ -254,6 +256,18 @@ def _extract_knowledge_graph(
         )
 
         if book_coherence_result is not None and book_coherence_result.chunks:
+            # Process importance_annotations: update Stage 1 chunks with importance
+            if book_coherence_result.importance_annotations:
+                for annotation in book_coherence_result.importance_annotations:
+                    chunk_id = annotation.get("chunk_id")
+                    importance = annotation.get("importance")
+
+                    # Find the chunk in user_focused_chunks and update its importance
+                    for chunk in user_focused_chunks:
+                        if chunk.id == chunk_id:
+                            chunk.importance = importance
+                            break
+
             # Add book-coherence chunks to working memory and assign IDs
             book_coherence_chunks, book_coherence_edges = working_memory.add_chunks_with_links(book_coherence_result)
 
@@ -271,7 +285,9 @@ def _extract_knowledge_graph(
             # Note: Only pass book_coherence chunks/temp_ids, since user_focused chunks
             # are already referenced by integer IDs in the links
             for from_id, to_id in book_coherence_edges:
-                strength = _find_edge_strength(book_coherence_result.links, from_id, to_id, book_coherence_chunks, book_coherence_result.temp_ids)
+                strength = _find_edge_strength(
+                    book_coherence_result.links, from_id, to_id, book_coherence_chunks, book_coherence_result.temp_ids
+                )
                 knowledge_graph.add_edge(from_id, to_id, strength=strength)
 
             all_chunks.extend(book_coherence_chunks)
@@ -318,7 +334,7 @@ def _save_knowledge_graph(
             chunk.generation,
             chunk.sentence_id,
             chunk.label,
-            chunk.chunk_type,
+            chunk.content,  # AI-generated summary
             sentence_ids,
             retention=chunk.retention,
             importance=chunk.importance,
@@ -433,7 +449,7 @@ def _find_edge_strength(
         Strength string or None if not found
     """
     # Build mapping from chunk ID to temp ID
-    id_to_temp = {chunk.id: temp_id for chunk, temp_id in zip(chunks, temp_ids)}
+    _id_to_temp = {chunk.id: temp_id for chunk, temp_id in zip(chunks, temp_ids)}
 
     # Try to find matching link
     for link in links:

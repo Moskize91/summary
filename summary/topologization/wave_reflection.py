@@ -53,9 +53,6 @@ class WaveReflection:
             # No new chunks, return top capacity chunks from history
             return all_chunks[:capacity]
 
-        # Build chunk ID to chunk mapping
-        chunk_map = {chunk.id: chunk for chunk in all_chunks}
-
         # Separate current fragment chunks from historical chunks
         latest_chunk_ids_set = set(latest_chunk_ids)
         historical_chunks = [c for c in all_chunks if c.id not in latest_chunk_ids_set]
@@ -86,11 +83,12 @@ class WaveReflection:
             # Apply generation decay to reflection score
             decayed_score = reflection_score * (self.generation_decay_factor**chunk.generation)
 
-            candidate_scores.append((chunk, decayed_score))
+            candidate_scores.append((chunk, reflection_score, decayed_score))
 
-        # Sort by score (descending) and select top capacity
-        candidate_scores.sort(key=lambda x: x[1], reverse=True)
-        selected_chunks = [chunk for chunk, _ in candidate_scores[:capacity]]
+        # Sort by decayed score (descending) and select top capacity
+        candidate_scores.sort(key=lambda x: x[2], reverse=True)
+
+        selected_chunks = [chunk for chunk, _, _ in candidate_scores[:capacity]]
 
         return selected_chunks
 
@@ -117,7 +115,6 @@ class WaveReflection:
             scores[chunk_id] = initial_score
 
         # BFS-like propagation along edges
-        # Queue contains (chunk_id, score_to_propagate)
         queue = deque()
         for chunk_id in latest_chunk_ids:
             queue.append(chunk_id)
@@ -188,15 +185,9 @@ class WaveReflection:
         reverse_graph = graph_copy.reverse()
 
         # BFS-like propagation in reverse direction
-        queue = deque()
-
-        # Start from nodes with no incoming edges in reverse graph
-        # (i.e., nodes with no outgoing edges in original graph)
-        for node_id in starting_nodes:
-            if node_id in reverse_graph and reverse_graph.out_degree(node_id) == 0:
-                queue.append(node_id)
-
-        visited = set(queue)
+        # Start from all nodes that have forward scores (not just leaf nodes)
+        queue = deque(starting_nodes)
+        visited = set(starting_nodes)
 
         while queue:
             current_id = queue.popleft()

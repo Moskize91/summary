@@ -6,25 +6,12 @@
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from enum import IntEnum
 from pathlib import Path
 
 import networkx as nx
 
 from .fragment import FragmentReader, SentenceId
 from .graph import Graph
-
-
-class ChunkType(IntEnum):
-    """Type of cognitive chunk based on extraction focus.
-
-    Attributes:
-        USER_FOCUSED: Chunk extracted based on user's specific intention
-        BOOK_COHERENCE: Chunk extracted to maintain book's narrative coherence
-    """
-
-    USER_FOCUSED = 1
-    BOOK_COHERENCE = 2
 
 
 @dataclass
@@ -68,35 +55,11 @@ class Chunk:
     generation: int
     sentence_id: SentenceId  # Primary sentence ID for ordering
     label: str
-    type: ChunkType  # Type of chunk (user_focused or book_coherence)
+    content: str  # AI-generated summary content
     _topologization: "Topologization" = field(repr=False)  # Reference for lazy loading
-    retention: str | None = None  # user_focused: verbatim/detailed/focused/relevant
-    importance: str | None = None  # book_coherence: critical/important/helpful
-    _content: str | None = field(default=None, repr=False)  # Lazy-loaded
+    retention: str | None = None  # verbatim/detailed/focused/relevant
+    importance: str | None = None  # critical/important/helpful
     _sentence_ids: list[SentenceId] | None = field(default=None, repr=False)  # Lazy-loaded
-
-    @property
-    def content(self) -> str:
-        """Lazy-load full content by reading all associated sentences.
-
-        Returns:
-            Full text content of this chunk
-        """
-        if self._content is None:
-            # Query chunk_sentences table to get all sentences
-            cursor = self._topologization._conn.execute(
-                "SELECT fragment_id, sentence_index FROM chunk_sentences WHERE chunk_id = ? "
-                "ORDER BY fragment_id, sentence_index",
-                (self.id,),
-            )
-            sentence_ids = [(row[0], row[1]) for row in cursor]
-
-            # Load all sentences and join
-            sentences = [self._topologization.get_sentence_text(sid) for sid in sentence_ids]
-            self._content = " ".join(sentences)
-            self._sentence_ids = sentence_ids
-
-        return self._content
 
     @property
     def sentence_ids(self) -> list[SentenceId]:
@@ -106,9 +69,15 @@ class Chunk:
             List of (fragment_id, sentence_index) tuples
         """
         if self._sentence_ids is None:
-            # Trigger content loading which also loads sentence_ids
-            _ = self.content
-        return self._sentence_ids or []
+            # Query chunk_sentences table to get all sentences
+            cursor = self._topologization._conn.execute(
+                "SELECT fragment_id, sentence_index FROM chunk_sentences WHERE chunk_id = ? "
+                "ORDER BY fragment_id, sentence_index",
+                (self.id,),
+            )
+            self._sentence_ids = [(row[0], row[1]) for row in cursor]
+
+        return self._sentence_ids
 
     def get_outgoing_edges(self) -> list[ChunkEdge]:
         """Get edges from this chunk to other chunks.
@@ -461,7 +430,10 @@ class Topologization:
             ValueError: If chunk not found
         """
         cursor = self._conn.execute(
-            "SELECT id, generation, fragment_id, sentence_index, label, type, retention, importance FROM chunks WHERE id = ?",
+            (
+                "SELECT id, generation, fragment_id, sentence_index, label, content, retention, importance"
+                " FROM chunks WHERE id = ?"
+            ),
             (chunk_id,),
         )
         row = cursor.fetchone()
@@ -473,7 +445,7 @@ class Topologization:
             generation=row[1],
             sentence_id=(row[2], row[3]),
             label=row[4],
-            type=ChunkType(row[5]),
+            content=row[5],
             retention=row[6],
             importance=row[7],
             _topologization=self,

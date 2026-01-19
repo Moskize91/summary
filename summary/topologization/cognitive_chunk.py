@@ -13,6 +13,7 @@ class ChunkBatch:
     temp_ids: list[str]  # Temporary IDs corresponding to chunks
     links: list[dict]  # Raw link data: [{"from": ..., "to": ..., "strength": "critical/important/helpful"}]
     order_correct: bool  # Whether JSON key order was correct
+    importance_annotations: list[dict] | None = None  # Stage 2 only: [{"chunk_id": int, "importance": str}]
 
 
 @dataclass
@@ -27,14 +28,18 @@ class CognitiveChunk:
     sentence_id: SentenceId  # Primary sentence ID (first sentence, for ordering)
     label: str  # Short summary (5-15 chars) for quick scanning
     content: str  # Full content
-    chunk_type: int  # Type of chunk: 1=user_focused, 2=book_coherence
     sentence_ids: list[SentenceId] = field(default_factory=list)  # All sentence IDs that comprise this chunk
     links: list[int] = field(default_factory=list)
-    retention: str | None = None  # user_focused: verbatim/detailed/focused/relevant
-    importance: str | None = None  # book_coherence: critical/important/helpful
+    retention: str | None = None  # verbatim/detailed/focused/relevant
+    importance: str | None = None  # critical/important/helpful
 
     def __repr__(self) -> str:
         """Return a readable representation."""
         links_str = f" -> {self.links}" if self.links else ""
-        type_str = "UF" if self.chunk_type == 1 else "BC"
-        return f"Chunk({self.id}[{type_str}]: [{self.label}] {self.content[:50]}...{links_str})"
+        attrs = []
+        if self.retention:
+            attrs.append(f"R:{self.retention}")
+        if self.importance:
+            attrs.append(f"I:{self.importance}")
+        attrs_str = ",".join(attrs) if attrs else "no-attrs"
+        return f"Chunk({self.id}[{attrs_str}]: [{self.label}] {self.content[:50]}...{links_str})"

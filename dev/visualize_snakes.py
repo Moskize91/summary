@@ -238,10 +238,12 @@ def _generate_html_wrapper(
         node_id = str(node["id"])
         node_info = {
             "id": node_id,
+            "generation": node.get("generation", 0),
             "sentence_id": node["sentence_id"],
             "label": node["label"],
             "content": node["content"],
-            "type": node.get("type", "unknown"),  # Add type field
+            "retention": node.get("retention"),
+            "importance": node.get("importance"),
         }
         # Add snake info
         if node["id"] in node_to_snake:
@@ -382,19 +384,20 @@ def _generate_html_wrapper(
 
         #tooltip {{
             position: fixed;
-            background: rgba(0, 0, 0, 0.9);
+            background: rgba(0, 0, 0, 0.92);
             color: white;
-            padding: 10px 14px;
-            border-radius: 6px;
+            padding: 2px 12px;
+            border-radius: 8px;
             font-size: 14px;
-            line-height: 1.5;
-            max-width: 400px;
+            line-height: 1.05;
+            max-width: 500px;
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.2s;
             z-index: 1000;
             white-space: pre-wrap;
             word-wrap: break-word;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
         }}
 
         #tooltip.show {{
@@ -404,30 +407,63 @@ def _generate_html_wrapper(
         .tooltip-label {{
             font-weight: bold;
             color: #FFF700;
-            font-size: 15px;
-            margin-bottom: 2px;
-            line-height: 1.3;
+            font-size: 16px;
+            margin-bottom: 0;
+            line-height: 1.05;
+            padding-bottom: 0;
+            border-bottom: 1px solid #444;
         }}
 
-        .tooltip-meta {{
-            color: #aaa;
-            font-size: 11px;
-            margin-bottom: 6px;
-            line-height: 1.2;
+        .tooltip-meta-section {{
+            margin-bottom: 0;
+        }}
+
+        .tooltip-meta-item {{
+            color: #bbb;
+            font-size: 12px;
+            margin: 0;
+            line-height: 1.05;
         }}
 
         .tooltip-snake {{
             color: #4ECDC4;
             font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: 1px solid #444;
+        }}
+
+        .tooltip-attr {{
+            color: #ddd;
+            font-size: 13px;
+            margin: 0;
+            line-height: 1.05;
+        }}
+
+        .attr-value {{
+            color: #FFA07A;
+            font-weight: bold;
+        }}
+
+        .tooltip-content-section {{
+            margin-top: 1px;
+            padding-top: 1px;
+            border-top: 1px solid #555;
+        }}
+
+        .tooltip-content-label {{
+            color: #4ECDC4;
             font-size: 12px;
-            margin-bottom: 4px;
+            font-weight: bold;
+            margin-bottom: 0;
         }}
 
         .tooltip-content {{
-            border-top: 1px solid #555;
-            padding-top: 6px;
-            margin-top: 4px;
-            line-height: 1.5;
+            color: #eee;
+            font-size: 13px;
+            line-height: 1.1;
+            margin-top: 0;
         }}
     </style>
 </head>
@@ -496,14 +532,34 @@ def _generate_html_wrapper(
                     snakeInfo = `<div class="tooltip-snake">🐍 Snake ${{data.snake_id}}</div>`;
                 }}
 
-                // Format type display
-                const typeLabel = data.type === 'user_focused' ? '👤 User Focused' : '📖 Book Coherence';
+                // Format attributes
+                let retentionInfo = '';
+                let importanceInfo = '';
+                if (data.retention) {{
+                    retentionInfo = `<div class="tooltip-attr">📌 Retention: <span class="attr-value">${{
+                        data.retention
+                    }}</span></div>`;
+                }}
+                if (data.importance) {{
+                    importanceInfo = `<div class="tooltip-attr">⭐ Importance: <span class="attr-value">${{
+                        data.importance
+                    }}</span></div>`;
+                }}
 
                 const tooltipHTML = `
                     ${{snakeInfo}}
                     <div class="tooltip-label">${{data.label}}</div>
-                    <div class="tooltip-meta">ID: ${{data.id}} | Sentence ID: ${{data.sentence_id}} | Type: ${{typeLabel}}</div>
-                    <div class="tooltip-content">${{data.content}}</div>
+                    <div class="tooltip-meta-section">
+                        <div class="tooltip-meta-item">🆔 ID: ${{data.id}}</div>
+                        <div class="tooltip-meta-item">📊 Generation: ${{data.generation}}</div>
+                        <div class="tooltip-meta-item">📝 Sentence: ${{data.sentence_id}}</div>
+                    </div>
+                    ${{retentionInfo}}
+                    ${{importanceInfo}}
+                    <div class="tooltip-content-section">
+                        <div class="tooltip-content-label">💬 Content</div>
+                        <div class="tooltip-content">${{data.content}}</div>
+                    </div>
                 `;
                 tooltip.innerHTML = tooltipHTML;
                 tooltip.classList.add('show');
