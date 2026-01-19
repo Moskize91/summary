@@ -59,6 +59,7 @@ class Chunk:
     _topologization: "Topologization" = field(repr=False)  # Reference for lazy loading
     retention: str | None = None  # verbatim/detailed/focused/relevant
     importance: str | None = None  # critical/important/helpful
+    tokens: int = 0  # Total token count of original source sentences
     _sentence_ids: list[SentenceId] | None = field(default=None, repr=False)  # Lazy-loaded
 
     @property
@@ -431,7 +432,7 @@ class Topologization:
         """
         cursor = self._conn.execute(
             (
-                "SELECT id, generation, fragment_id, sentence_index, label, content, retention, importance"
+                "SELECT id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens"
                 " FROM chunks WHERE id = ?"
             ),
             (chunk_id,),
@@ -448,6 +449,7 @@ class Topologization:
             content=row[5],
             retention=row[6],
             importance=row[7],
+            tokens=row[8],
             _topologization=self,
         )
 

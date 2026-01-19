@@ -5,11 +5,13 @@ Two-Phase Algorithm:
 Phase 1: Snake Forming (Forbid Snake Eating Snake)
 - Allow snakes to absorb isolated nodes
 - Forbidden: Snake eating snake (both ≥2)
+- Token limit: merged tokens must not exceed snake_tokens
 - Run until no more valid merges
 
 Phase 2: Snake Merging (Allow Snake Eating Snake)
 - Allow all merges based on fingerprint similarity
-- Stop when snake count ≤ total_nodes * phase2_stop_ratio
+- Token limit: merged tokens must not exceed snake_tokens
+- Stop when no more valid merges (all remaining merges exceed token limit)
 
 Design Principles:
 1. Input MUST be a weakly connected graph (use split_connected_components first)
@@ -19,6 +21,7 @@ Design Principles:
 5. Diameter-based distance creates natural self-correction without artificial limits
 6. Edge weights based on node attributes (retention/importance) and link strength
 7. Ink flows from source node through weighted edges to all nodes (BFS, treating edges as undirected)
+8. Token-based snake size control: each snake's total tokens cannot exceed snake_tokens
 """
 
 import heapq
@@ -52,7 +55,7 @@ def split_connected_components(graph: nx.DiGraph) -> list[nx.DiGraph]:
 class MergeConfig:
     """Configuration for one merge phase."""
 
-    stop_count: int | None = None  # Absolute number of clusters to stop at
+    snake_tokens: int  # Maximum tokens allowed in a snake
     enable_bonus: bool = False  # Enable bonus for snake+singleton merges (forbid snake eating snake)
 
 
@@ -68,16 +71,16 @@ class SnakeDetector:
     def __init__(
         self,
         min_cluster_size: int = 2,
-        phase2_stop_ratio: float = 0.15,
+        snake_tokens: int = 700,
     ):
         """Initialize snake detector.
 
         Args:
             min_cluster_size: Minimum nodes in a snake (default: 2)
-            phase2_stop_ratio: Phase 2 stops at this ratio of total nodes (default: 0.15)
+            snake_tokens: Maximum tokens allowed in a snake (default: 700)
         """
         self.min_cluster_size = min_cluster_size
-        self.phase2_stop_ratio = phase2_stop_ratio
+        self.snake_tokens = snake_tokens
 
     def detect_snakes(self, graph: nx.DiGraph) -> list[list[int]]:
         """Detect snakes in a weakly connected graph.
@@ -99,6 +102,17 @@ class SnakeDetector:
 
         total_nodes = len(graph.nodes())
 
+        # Check total tokens - if small enough, return as single snake
+        total_tokens = sum(graph.nodes[node].get("tokens", 0) for node in graph.nodes())
+        print(f"  Total nodes: {total_nodes}, Total tokens: {total_tokens}")
+
+        if total_tokens <= self.snake_tokens:
+            print(f"  Total tokens ({total_tokens}) ≤ snake_tokens ({self.snake_tokens})")
+            print(f"  Returning entire component as single snake")
+            snake = list(graph.nodes())
+            snake.sort(key=lambda nid: graph.nodes[nid]["sentence_id"])
+            return [snake]
+
         # Step 1: Compute fingerprints for all nodes
         print("  Computing topological fingerprints...")
         fingerprints = self._compute_all_fingerprints(graph)
@@ -111,24 +125,18 @@ class SnakeDetector:
         print(f"  Initial clusters: {total_nodes}")
 
         phase1_config = MergeConfig(
-            stop_count=0,  # Run until no more valid merges
+            snake_tokens=self.snake_tokens,
             enable_bonus=True,  # Enable to forbid snake eating snake
-            # No max_snake_size limit - rely on diameter self-correction
         )
         clusters = self._greedy_merge(graph, fingerprints, phase1_config)
 
         # Phase 2: Snake Merging (allow snake eating snake)
         print("\n  === Phase 2: Snake Merging (Allow Snake Eating Snake) ===")
-        phase2_stop_count = int(total_nodes * self.phase2_stop_ratio)
-        print(
-            f"  Target: Reduce to {phase2_stop_count} snakes "
-            f"({self.phase2_stop_ratio:.0%} of {total_nodes} total nodes)"
-        )
+        print(f"  Target: Merge snakes until no more valid merges (token limit: {self.snake_tokens})")
 
         phase2_config = MergeConfig(
-            stop_count=phase2_stop_count,
+            snake_tokens=self.snake_tokens,
             enable_bonus=False,  # Disable - allow snake eating snake
-            # No size penalty - rely on diameter self-correction
         )
         clusters = self._greedy_merge(graph, fingerprints, phase2_config, initial_clusters=clusters)
 
@@ -426,6 +434,18 @@ class SnakeDetector:
 
         return min_value
 
+    def _compute_cluster_tokens(self, graph: nx.DiGraph, cluster: list[int]) -> int:
+        """Compute total tokens for a cluster.
+
+        Args:
+            graph: NetworkX graph with node attributes
+            cluster: List of node IDs
+
+        Returns:
+            Total token count
+        """
+        return sum(graph.nodes[node].get("tokens", 0) for node in cluster)
+
     def _greedy_merge(
         self,
         graph: nx.DiGraph,
@@ -433,7 +453,7 @@ class SnakeDetector:
         config: MergeConfig,
         initial_clusters: dict[int, list[int]] | None = None,
     ) -> dict[int, list[int]]:
-        """Greedy merge algorithm.
+        """Greedy merge algorithm with token limit.
 
         Args:
             graph: NetworkX graph
@@ -458,9 +478,8 @@ class SnakeDetector:
                     node_to_cluster[node] = cluster_id
 
         initial_count = len(clusters)
-        stop_count = config.stop_count if config.stop_count is not None else 0
 
-        print(f"  Initial clusters: {initial_count}, stop at: {stop_count}")
+        print(f"  Initial clusters: {initial_count}, token limit: {config.snake_tokens}")
 
         # Build initial edge heap
         edge_heap = []
@@ -479,8 +498,8 @@ class SnakeDetector:
                 heapq.heappush(edge_heap, (-value, (cluster_u, cluster_v)))
                 edge_set.add((cluster_u, cluster_v))
 
-        # Greedy merging loop
-        while edge_heap and len(clusters) > stop_count:
+        # Greedy merging loop (continue until heap is empty)
+        while edge_heap:
             # Pop highest value edge
             neg_value, (u, v) = heapq.heappop(edge_heap)
             value = -neg_value
@@ -503,6 +522,14 @@ class SnakeDetector:
 
                 if both_snakes:
                     continue  # Skip this merge
+
+            # Token limit check: ensure merged cluster doesn't exceed token limit
+            tokens_u = self._compute_cluster_tokens(graph, clusters[cluster_u])
+            tokens_v = self._compute_cluster_tokens(graph, clusters[cluster_v])
+            merged_tokens = tokens_u + tokens_v
+
+            if merged_tokens > config.snake_tokens:
+                continue  # Skip this merge
 
             # Merge operation
             clusters[cluster_u].extend(clusters[cluster_v])

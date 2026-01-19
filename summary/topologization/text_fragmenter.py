@@ -18,6 +18,7 @@ class FragmentWithSentences:
     text: str
     sentence_ids: list[SentenceId]
     sentence_texts: list[str]  # Sentence texts corresponding to sentence_ids
+    sentence_token_counts: list[int]  # Token counts corresponding to sentence_ids
 
 
 class TextFragmenter:
@@ -90,6 +91,7 @@ class TextFragmenter:
         current_fragment_tokens = 0
         current_sentence_ids = []
         current_sentence_texts = []
+        current_sentence_token_counts = []
 
         # Use spacy's pipe() for efficient batch processing
         for doc in self._nlp.pipe(self._generate_text_batches(file_path), batch_size=10):
@@ -109,11 +111,13 @@ class TextFragmenter:
                         text="".join(current_fragment),
                         sentence_ids=current_sentence_ids.copy(),
                         sentence_texts=current_sentence_texts.copy(),
+                        sentence_token_counts=current_sentence_token_counts.copy(),
                     )
                     current_fragment = []
                     current_fragment_tokens = 0
                     current_sentence_ids = []
                     current_sentence_texts = []
+                    current_sentence_token_counts = []
 
                 # Start new fragment if needed (first sentence of new fragment)
                 if not current_fragment:
@@ -126,6 +130,7 @@ class TextFragmenter:
                 current_fragment_tokens += sentence_token_count
                 current_sentence_ids.append(sentence_id)
                 current_sentence_texts.append(sentence_text)
+                current_sentence_token_counts.append(sentence_token_count)
 
         # Yield the last fragment if it exists
         if current_fragment:
@@ -134,6 +139,7 @@ class TextFragmenter:
                 text="".join(current_fragment),
                 sentence_ids=current_sentence_ids.copy(),
                 sentence_texts=current_sentence_texts.copy(),
+                sentence_token_counts=current_sentence_token_counts.copy(),
             )
 
     def finalize(self):

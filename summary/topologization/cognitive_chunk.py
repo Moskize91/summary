@@ -32,6 +32,7 @@ class CognitiveChunk:
     links: list[int] = field(default_factory=list)
     retention: str | None = None  # verbatim/detailed/focused/relevant
     importance: str | None = None  # critical/important/helpful
+    tokens: int = 0  # Total token count of original source sentences
 
     def __repr__(self) -> str:
         """Return a readable representation."""

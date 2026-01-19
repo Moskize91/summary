@@ -32,7 +32,7 @@ class TopologizationConfig:
 
     # Snake detection parameters
     min_cluster_size: int = 2
-    phase2_stop_ratio: float = 0.15
+    snake_tokens: int = 700
 
 
 def topologize(
@@ -218,6 +218,7 @@ def _extract_knowledge_graph(
             working_memory,
             fragment_with_sentences.sentence_ids,
             fragment_with_sentences.sentence_texts,
+            fragment_with_sentences.sentence_token_counts,
         )
 
         if user_focused_result is None:
@@ -235,6 +236,9 @@ def _extract_knowledge_graph(
                 sentence_id=chunk.sentence_id,
                 label=chunk.label,
                 content=chunk.content,
+                retention=chunk.retention,
+                importance=chunk.importance,
+                tokens=chunk.tokens,
             )
 
         # Add user-focused edges to knowledge graph with strength
@@ -253,6 +257,7 @@ def _extract_knowledge_graph(
             user_focused_chunks,
             fragment_with_sentences.sentence_ids,
             fragment_with_sentences.sentence_texts,
+            fragment_with_sentences.sentence_token_counts,
         )
 
         if book_coherence_result is not None and book_coherence_result.chunks:
@@ -279,6 +284,9 @@ def _extract_knowledge_graph(
                     sentence_id=chunk.sentence_id,
                     label=chunk.label,
                     content=chunk.content,
+                    retention=chunk.retention,
+                    importance=chunk.importance,
+                    tokens=chunk.tokens,
                 )
 
             # Add book-coherence edges to knowledge graph with strength
@@ -338,6 +346,7 @@ def _save_knowledge_graph(
             sentence_ids,
             retention=chunk.retention,
             importance=chunk.importance,
+            tokens=chunk.tokens,
         )
 
     # Save edges with strength metadata
@@ -359,7 +368,7 @@ def _analyze_snakes(knowledge_graph: nx.DiGraph, config: TopologizationConfig) -
     print("\nDetecting thematic chains (snakes)...")
     detector = SnakeDetector(
         min_cluster_size=config.min_cluster_size,
-        phase2_stop_ratio=config.phase2_stop_ratio,
+        snake_tokens=config.snake_tokens,
     )
 
     all_snakes = []

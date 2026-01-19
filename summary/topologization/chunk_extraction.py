@@ -35,6 +35,7 @@ class ChunkExtractor:
         working_memory: WorkingMemory,
         chunk_sentence_ids: list[SentenceId],
         chunk_sentence_texts: list[str],
+        chunk_sentence_token_counts: list[int],
     ) -> ChunkBatch | None:
         """Extract user-focused chunks from text (Stage 1).
 
@@ -43,6 +44,7 @@ class ChunkExtractor:
             working_memory: Current working memory state
             chunk_sentence_ids: List of sentence IDs for this text chunk
             chunk_sentence_texts: List of sentence texts corresponding to sentence IDs
+            chunk_sentence_token_counts: List of token counts corresponding to sentence IDs
 
         Returns:
             ChunkBatch containing user-focused chunks
@@ -70,6 +72,7 @@ class ChunkExtractor:
             response=response,
             chunk_sentence_ids=chunk_sentence_ids,
             chunk_sentence_texts=chunk_sentence_texts,
+            chunk_sentence_token_counts=chunk_sentence_token_counts,
             expected_type="user_focused",
             metadata_field="retention",
         )
@@ -81,6 +84,7 @@ class ChunkExtractor:
         user_focused_chunks: list[CognitiveChunk],
         chunk_sentence_ids: list[SentenceId],
         chunk_sentence_texts: list[str],
+        chunk_sentence_token_counts: list[int],
     ) -> ChunkBatch | None:
         """Extract book-coherence chunks from text (Stage 2).
 
@@ -90,6 +94,7 @@ class ChunkExtractor:
             user_focused_chunks: Chunks extracted in Stage 1 (with assigned integer IDs)
             chunk_sentence_ids: List of sentence IDs for this text chunk
             chunk_sentence_texts: List of sentence texts corresponding to sentence IDs
+            chunk_sentence_token_counts: List of token counts corresponding to sentence IDs
 
         Returns:
             ChunkBatch containing book-coherence chunks
@@ -128,6 +133,7 @@ class ChunkExtractor:
             response=response,
             chunk_sentence_ids=chunk_sentence_ids,
             chunk_sentence_texts=chunk_sentence_texts,
+            chunk_sentence_token_counts=chunk_sentence_token_counts,
             expected_type="book_coherence",
             metadata_field="importance",
         )
@@ -137,6 +143,7 @@ class ChunkExtractor:
         response: str,
         chunk_sentence_ids: list[SentenceId],
         chunk_sentence_texts: list[str],
+        chunk_sentence_token_counts: list[int],
         expected_type: str,
         metadata_field: str,
     ) -> ChunkBatch | None:
@@ -146,6 +153,7 @@ class ChunkExtractor:
             response: LLM response text
             chunk_sentence_ids: List of sentence IDs
             chunk_sentence_texts: List of sentence texts
+            chunk_sentence_token_counts: List of token counts corresponding to sentence IDs
             expected_type: Expected chunk type ("user_focused" or "book_coherence")
             metadata_field: Metadata field to extract ("retention" or "importance")
 
@@ -166,8 +174,11 @@ class ChunkExtractor:
             chunks = []
             temp_ids = []
 
-            # Build sentence text to ID mapping for efficient lookup
+            # Build sentence text to ID mapping and ID to token count mapping for efficient lookup
             sentence_text_to_id = {text: sid for text, sid in zip(chunk_sentence_texts, chunk_sentence_ids)}
+            sentence_id_to_tokens = {
+                sid: tokens for sid, tokens in zip(chunk_sentence_ids, chunk_sentence_token_counts)
+            }
 
             for data in chunks_data:
                 # Parse source_sentences to find matching sentence IDs
@@ -201,6 +212,9 @@ class ChunkExtractor:
                 # Use first matched sentence ID as primary sentence_id (for sorting)
                 primary_sentence_id = matched_sentence_ids[0]
 
+                # Calculate total tokens from all matched sentences
+                total_tokens = sum(sentence_id_to_tokens.get(sid, 0) for sid in matched_sentence_ids)
+
                 # Extract metadata (retention or importance)
                 retention = data.get("retention") if metadata_field == "retention" else None
                 importance = data.get("importance") if metadata_field == "importance" else None
@@ -215,6 +229,7 @@ class ChunkExtractor:
                     links=[],  # Will be populated after ID assignment
                     retention=retention,
                     importance=importance,
+                    tokens=total_tokens,
                 )
                 chunks.append(chunk)
                 temp_ids.append(data.get("temp_id", ""))
