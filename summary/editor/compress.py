@@ -190,6 +190,20 @@ def compress_text(
     for iteration in range(1, max_iterations + 1):
         print(f"\n--- Iteration {iteration}/{max_iterations} ---")
 
+        # Log iteration header and revision feedback BEFORE compression
+        if log_file is not None:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n{'=' * 80}\n")
+                f.write(f"ITERATION {iteration}/{max_iterations}\n")
+                f.write(f"{'=' * 80}\n\n")
+
+                # Show revision feedback if present (from previous iteration)
+                if revision_feedback:
+                    f.write("Revision Feedback (Compressor's View):\n")
+                    f.write(f"{'-' * 80}\n")
+                    f.write(revision_feedback)
+                    f.write(f"\n{'-' * 80}\n\n")
+
         # 4.1 Compress text
         print("Compressing text...")
         full_response, compressed_text = _compress_iteration(
@@ -203,20 +217,9 @@ def compress_text(
         )
         print(f"Compressed to {len(compressed_text)} characters")
 
-        # Log compressed text
+        # Log compressed text result
         if log_file is not None:
             with open(log_file, "a", encoding="utf-8") as f:
-                f.write(f"\n{'=' * 80}\n")
-                f.write(f"ITERATION {iteration}/{max_iterations}\n")
-                f.write(f"{'=' * 80}\n\n")
-
-                # Show revision feedback if present
-                if revision_feedback:
-                    f.write("Revision Feedback (Compressor's View):\n")
-                    f.write(f"{'-' * 80}\n")
-                    f.write(revision_feedback)
-                    f.write(f"\n{'-' * 80}\n\n")
-
                 # Log thinking text (excluding compressed text section)
                 thinking_text = _extract_thinking_text(full_response)
                 if thinking_text and thinking_text.strip():
@@ -226,7 +229,7 @@ def compress_text(
                     f.write(f"\n{'-' * 80}\n\n")
 
                 # Log extracted compressed text with character count
-                f.write(f"Extracted Compressed Text ({len(compressed_text)} characters):\n")
+                f.write(f"Compressed Text ({len(compressed_text)} characters):\n")
                 f.write(f"{'-' * 80}\n")
                 f.write(compressed_text)
                 f.write(f"\n{'-' * 80}\n\n\n")
@@ -253,56 +256,6 @@ def compress_text(
                 reviews=reviews,
             )
         )
-
-        # Log review results
-        if log_file is not None:
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write("Review Results:\n")
-                f.write(f"{'-' * 80}\n")
-                f.write(f"Issue Score: {score:.2f} (lower is better)\n\n")
-
-                # Log all clue reviewers (including failed ones)
-                for cr in clue_reviewers:
-                    # Find corresponding review result
-                    review = next((r for r in reviews if r.clue_id == cr.clue_id), None)
-
-                    f.write(f"Clue {cr.clue_id} (weight: {cr.weight:.2f}):\n")
-                    f.write(f"  Label: {cr.label}\n")
-                    f.write(f"  Reviewer:\n{cr.reviewer_info}\n")
-
-                    if review is None:
-                        f.write("  ❌ REVIEW FAILED - No response from LLM or parse error\n")
-                    else:
-                        if review.issues:
-                            f.write(f"\n[[ Issues ({len(review.issues)}) ]]\n")
-                            for issue in review.issues:
-                                tier = issue.get("tier", "?")
-                                issue_type = issue.get("type", "unknown")
-                                severity = issue.get("severity", "unknown")
-                                description = issue.get("missing_info") or issue.get("problem", "No description")
-                                suggestion = issue.get("suggestion", "")
-
-                                f.write(f"    - [TIER {tier}] [{severity.upper()}] ({issue_type})\n")
-                                f.write(f"      Problem: {description}\n")
-                                if suggestion:
-                                    f.write(f"      Suggestion: {suggestion}\n")
-                        else:
-                            f.write("  No issues reported\n")
-
-                    f.write("\n")
-
-                # Add decision summary
-                f.write(f"{'-' * 80}\n")
-                f.write("Decision: ")
-                if score == 0:
-                    f.write("✓ PERFECT - No issues found, compression successful\n")
-                elif iteration < max_iterations:
-                    f.write(
-                        f"⟳ CONTINUE - Score {score:.2f}, proceeding to iteration {iteration + 1}/{max_iterations}\n"
-                    )
-                else:
-                    f.write("⏹ FINAL - This is the last iteration\n")
-                f.write(f"{'-' * 80}\n\n\n")
 
         # If score is 0 (perfect), stop early
         if score == 0:
