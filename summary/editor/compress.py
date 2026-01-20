@@ -243,6 +243,16 @@ def compress_text(
             reviewer_histories=reviewer_histories if reviewer_histories else None,
         )
 
+        # Log reviewer output summary to file
+        if log_file is not None:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write("Reviewer Output Summary:\n")
+                f.write(f"{'-' * 80}\n")
+                for review in reviews:
+                    issue_count = len(review.issues)
+                    f.write(f"Clue {review.clue_id}: output {issue_count} issue(s)\n")
+                f.write(f"{'-' * 80}\n\n")
+
         # 4.3 Calculate score (lower is better)
         score = _calculate_score(reviews)
         print(f"Issue score: {score:.2f} (lower is better)")
@@ -265,6 +275,35 @@ def compress_text(
         # 4.5 Collect feedback for next iteration
         if iteration < max_iterations:
             print("Preparing revision feedback...")
+
+            # First, build the same sorted issue list as _collect_feedback() for logging
+            if log_file is not None:
+                severity_values = {"critical": 9, "major": 3, "minor": 1}
+                all_issues_for_log = []
+                for review in reviews:
+                    for issue_index, issue in enumerate(review.issues):
+                        severity = issue.get("severity", "minor").lower()
+                        severity_value = severity_values.get(severity, 1)
+                        all_issues_for_log.append(
+                            {
+                                "clue_id": review.clue_id,
+                                "issue_index": issue_index,
+                                "severity_value": severity_value,
+                                "weight": review.weight,
+                            }
+                        )
+
+                # Sort by same logic as _collect_feedback()
+                all_issues_for_log.sort(key=lambda x: (-x["severity_value"], -x["weight"], x["issue_index"]))
+
+                # Write Issue Index Table
+                with open(log_file, "a", encoding="utf-8") as f:
+                    f.write("Issue Index Table (for debugging):\n")
+                    f.write(f"{'-' * 80}\n")
+                    for i, issue in enumerate(all_issues_for_log, 1):
+                        f.write(f"  Issue #{i}: Clue {issue['clue_id']}, Index {issue['issue_index']}\n")
+                    f.write(f"{'-' * 80}\n\n")
+
             revision_feedback = _collect_feedback(reviews, llm)
             previous_compressed_text = compressed_text
 
@@ -584,15 +623,16 @@ def _collect_feedback(reviews: list[ReviewResult], llm: LLM) -> str:
     # Collect all issues with metadata
     all_issues = []
     for review in reviews:
-        for raw_index, issue in enumerate(review.issues):
+        for issue_index, issue in enumerate(review.issues):
             severity = issue.get("severity", "minor").lower()
             severity_value = severity_values.get(severity, 1)
             all_issues.append(
                 {
+                    "clue_id": review.clue_id,
+                    "issue_index": issue_index,
                     "severity": severity,
                     "severity_value": severity_value,
                     "weight": review.weight,
-                    "raw_index": raw_index,
                     "type": issue.get("type", "unknown"),
                     "description": issue.get("missing_info") or issue.get("problem", "No description"),
                     "suggestion": issue.get("suggestion", ""),
@@ -602,10 +642,10 @@ def _collect_feedback(reviews: list[ReviewResult], llm: LLM) -> str:
     if not all_issues:
         return "No issues found - all reviewers are satisfied."
 
-    # Sort by (severity_value DESC, weight DESC, raw_index ASC)
-    all_issues.sort(key=lambda x: (-x["severity_value"], -x["weight"], x["raw_index"]))
+    # Sort by (severity_value DESC, weight DESC, issue_index ASC)
+    all_issues.sort(key=lambda x: (-x["severity_value"], -x["weight"], x["issue_index"]))
 
-    # Format issues description (max 9 issues shown)
+    # Format issues description (max 9 issues shown) - for LLM feedback
     issues_lines = []
     visible_count = min(9, len(all_issues))
     hidden_count = len(all_issues) - visible_count
