@@ -6,9 +6,7 @@ You are creating a tiered verification strategy for reviewing compressed text. Y
 
 ## Input Data
 
-The user will provide:
-- User's reading intention
-- A narrative clue presented as **continuous book-like text** with chunk boundaries marked using XML-style tags
+The user will provide a narrative clue presented as **continuous book-like text** with chunk boundaries marked using XML-style tags.
 
 **XML Markup Format:**
 ```xml
@@ -33,14 +31,16 @@ More chunk text...
 **Reading Tips:**
 - Read the text naturally like a book
 - Unmarked text provides context (surrounding narrative)
-- Marked chunks are the focus points for verification
+- Marked chunks (`<chunk>`) are the focus points for verification
 - If chunks overlap (same text, different attributes), the highest-priority attributes are shown
 
 ---
 
 ## Your Task
 
-Analyze each marked `<chunk>` and assign it to one of four verification tiers based on its attributes:
+Analyze each marked `<chunk>` and assign it to one of four verification tiers based on its attributes.
+
+**Note**: The `retention` and `importance` attributes represent the consensus from upstream analysis (user intent + topological structure). Use them as the basis for TIER assignment.
 
 ### TIER 1: Critical Details (Highest priority - detailed verification)
 **Criteria:** retention IN [detailed, verbatim] OR (retention exists AND importance IN [critical, important])
@@ -79,11 +79,9 @@ Structure your output EXACTLY as follows:
 
 ---
 
-### TIER 1: Critical Details (Must preserve accurately)
+### TIER 1: Critical Details
 
-**【Chunk label】 [retention: X, importance: Y]**
-
-Verification: ACCURATE (Details + key terms must be precise)
+**【Chunk label】**
 
 Original source:
 <source>
@@ -93,29 +91,22 @@ Original source:
 Requirements:
 - ✓ 【Specific requirement 1, e.g., "Must mention core concept A"】
 - ✓ 【Specific requirement 2, e.g., "Must include key term B with accurate meaning"】
-- ~ Phrasing can be adjusted, but meaning must not deviate
 
 ---
 
-### TIER 2: Important Facts (Core meaning must be present)
+### TIER 2: Important Facts
 
-**【Chunk label】 [retention: X]**
-
-Verification: SEMANTIC (Core facts must exist, wording flexible)
+**【Chunk label】**
 
 Core facts:
 - 【Abstract fact 1, focus on WHAT information, not HOW it's worded】
 - 【Abstract fact 2】
 
-Flexibility: 【Note about acceptable variations】
-
 ---
 
-### TIER 3: Narrative Logic (Logical connections must exist)
+### TIER 3: Narrative Logic
 
-**【Chunk label】 [importance: X]**
-
-Verification: PRESENT (Logic necessary, mention sufficient)
+**【Chunk label】**
 
 Logical requirement:
 → 【Imperative checkpoint, e.g., "Reader must understand X led to Y"】
@@ -123,25 +114,11 @@ Logical requirement:
 
 ---
 
-### TIER 4: Optional Context (Nice to have)
+### TIER 4: Optional Context
 
-**【Chunk label】 [retention: relevant]**
-
-Verification: OPTIONAL (Preserve if space allows)
+**【Chunk label】**
 
 Context: 【Brief description of background info】
-
-Impact if missing: 【Assessment of impact, e.g., "Minor, doesn't affect core understanding"】
-
----
-
-## Summary for Reviewer:
-- TIER 1: X chunks → Must strictly verify details
-- TIER 2: X chunks → Core facts cannot be lost
-- TIER 3: X chunks → Logical integrity check
-- TIER 4: X chunks → Optional
-
-Priority: Focus on TIER 1-2, then TIER 3 if critical for coherence
 
 ---
 
@@ -172,8 +149,9 @@ Priority: Focus on TIER 1-2, then TIER 3 if critical for coherence
    - ❌ BAD: "On June 6th father died, June 9th brother died..." (too specific)
 
 7. **User intent consideration:**
-   - Higher retention level = more aligned with user intent = stricter verification
-   - Book-coherence chunks (importance only) = looser verification, just check logical presence
+   - Chunk attributes (retention/importance) already encode user intent from the first stage
+   - Higher retention level = more aligned with user's reading goals
+   - Trust the attributes - don't second-guess the priority levels based on content alone
 
 8. **Context awareness:**
    - Unmarked text between chunks provides narrative context

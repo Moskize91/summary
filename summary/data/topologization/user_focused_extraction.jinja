@@ -31,24 +31,35 @@ Aim for 3-6 chunks that align with the user's intention. **Be selective - not ev
 
 ## RETENTION LEVEL GUIDELINES
 
-Assign each chunk a retention level based on the strategy above (this is NOT about objective importance, but about HOW the user wants it preserved):
+Assign each chunk a retention level based on the strategy above. The retention level indicates HOW the user wants this information preserved during compression:
 
-- **verbatim**: User explicitly requested ENTIRE passages/sentences be preserved word-for-word
-  - ONLY use this if the Verbatim section in the retention strategy contains actual guidance
-  - If Verbatim says "(None ...)" or is empty, do NOT use this level
-  - This applies to FULL text passages, NOT individual words or terms
-- **detailed**: User needs complete information retained without compression (content complete and accurate, but wording can be adjusted; includes preserving specific terminology)
-  - Use sparingly - only for content that MUST be captured completely
-- **focused**: User's primary interest that can be moderately summarized
-  - This should be the majority of extractions
-- **relevant**: User finds this useful but not essential (can be dropped if needed for space)
+- **verbatim**: ENTIRE passages/sentences must be preserved word-for-word
+  - ONLY use if the "Verbatim" section in the retention strategy contains actual guidance
+  - If it says "(None...)" or is empty, do NOT use this level
+  - Applies to FULL text passages, NOT individual words or terms
+  - Example: Direct quotes, critical descriptions that user explicitly requested preserved intact
+
+- **detailed**: Information must be captured COMPLETELY without loss
+  - Content must be complete and accurate, but wording can be adjusted
+  - Includes preserving specific terminology and precise facts
+  - Use sparingly - only for content that MUST be captured in full
+  - Example: Core arguments, essential steps, main mechanisms that user prioritizes
+
+- **focused**: User's PRIMARY interest that can be moderately summarized
+  - This should be the MAJORITY of extractions
+  - Content can be compressed while preserving meaning
+  - Example: Main themes, patterns, relationships the user cares about
+
+- **relevant**: Useful but NOT essential context (can be dropped if needed for space)
   - Use generously for secondary context and supporting details
+  - Helpful for understanding but not the user's main focus
+  - Example: Background information, supplementary examples
 
-**Distribution guideline**: Most chunks should be "focused", fewer should be "detailed", and "relevant" should be used liberally for nice-to-have context. Don't be afraid to use "relevant" - it means "useful but droppable", not "unimportant".
+**Distribution guideline**: Most chunks should be "focused", fewer "detailed", and "relevant" used liberally for nice-to-have context.
 
 **What NOT to extract:**
-- Do NOT extract chunks that match the "Exclude" criteria in the retention strategy
-- "Exclude" means these topics should not appear as user-focused chunks at all
+- Do NOT extract chunks matching the "Exclude" criteria in the retention strategy
+- "Exclude" means these topics should not appear as user-focused chunks (though book-coherence extraction may still include them for narrative flow)
 
 ---
 
@@ -69,7 +80,7 @@ The user will provide the new text segment in their message. Extract chunks from
 CRITICAL: You MUST output in this EXACT structure with "fragment_summary" FIRST, then "chunks" SECOND, then "links" THIRD:
 
 {
-  "fragment_summary": "Brief 1-2 sentence summary of the entire text segment's main narrative content (not user-focused, but book's natural progression). This will be used as a transition when this fragment is skipped.",
+  "fragment_summary": "Concise 1-2 sentence narrative capturing key events/developments in this segment. Write as if continuing the story naturally - avoid meta-narrative phrases like '本章讲述了', '随后描述了', 'this chapter describes'. This will be inserted as a transition when this fragment is skipped.",
   "chunks": [
     {
       "temp_id": "A",
@@ -96,10 +107,18 @@ CRITICAL: You MUST output in this EXACT structure with "fragment_summary" FIRST,
 }
 
 **Field Explanations:**
-- "fragment_summary": Brief summary of the entire text segment (1-2 sentences)
-  - Describe the main narrative or events in this segment, not focused on user intent
-  - Should work as a natural transition paragraph when this fragment is skipped
-  - Write in the same language as the text segment
+- "fragment_summary": Concise narrative of key events/developments in this segment (1-2 sentences)
+  - Write as NARRATIVE, not meta-commentary (e.g., "朱元璋加入义军" NOT "本章讲述朱元璋加入义军的过程")
+  - Capture what happens in the story's natural progression (not user's focus areas)
+  - Should read like a compressed continuation of the book itself
+  - Avoid meta-phrases: "本章描述了", "随后讲述了", "接着介绍了", "this chapter describes", "then it explains"
+  - Write in the same language and narrative tone as the original text
+
+**Style examples for fragment_summary:**
+  ✅ GOOD: "主角进入新城市，开始寻找工作" (direct narrative)
+  ✅ GOOD: "战争爆发，小镇陷入混乱" (direct narrative)
+  ❌ BAD: "本章讲述了主角进入新城市的过程" (meta-commentary)
+  ❌ BAD: "随后描述了战争爆发导致的混乱" (meta-commentary)
 
 - "chunks": Array of new information extracted from the text
   - "temp_id": Use letters like "A", "B", "C" for chunks in this extraction

@@ -11,38 +11,19 @@ Write your guidance as a retention strategy that defines preservation levels for
 ## Retention Strategy
 
 ### Verbatim
-**IMPORTANT: This level is OPTIONAL and should ONLY be filled if the user EXPLICITLY requests ENTIRE passages/sentences be preserved word-for-word.**
-
-**Trigger phrases indicating verbatim preservation (FULL passages only):**
-Phrases that explicitly request word-for-word preservation of entire passages, such as: "逐字保留", "一字不改", "原文照抄", "原样引用", "完整引用原文", "quote the entire passage", "preserve exact wording", "verbatim quote", "word-for-word".
-
-**NOT verbatim triggers (these map to Detailed level instead):**
-Phrases that request complete content but allow rewording, such as: "必须保留", "完整保留", "整段保留", "保留术语", "精确定义", "准确描述", "must preserve", "keep complete", "preserve terminology", "accurate definition". These indicate complete content preservation where specific terms must be accurate, but sentences can be rewritten.
-
-**Critical distinction:** Verbatim = entire passages preserved word-for-word. Detailed = specific terms/concepts preserved accurately, but sentences can be rewritten.
-
-**Granularity requirement:** Verbatim applies to ENTIRE passages/paragraphs/sentences, NOT individual words or phrases.
-
-If the user uses verbatim trigger phrases, describe what passages need word-for-word preservation in 1-2 sentences.
-
-**If the user does NOT explicitly request verbatim preservation at passage-level, write:**
-(None - user did not explicitly request verbatim preservation)
-
----
+[If the user explicitly requests word-for-word preservation of entire passages using phrases like "一字不漏", "原文保留", "verbatim", describe what passages need word-for-word preservation in 1-2 sentences. Otherwise write: "(None - user did not request verbatim preservation)"]
 
 ### Detailed
-[1-2 sentences describing what information needs COMPLETE capture without compression. Examples: core arguments, essential steps, main mechanisms, critical reasoning chains. The user may say things like "必须保留", "完整描述", "不能省略", "保留精确术语", "准确的定义" - these map to this level. Content must be complete and accurate, but wording can be adjusted. You should actively interpret what falls into this category based on the user's primary focus.]
+[1-2 sentences describing what information needs complete capture without compression. Examples: core arguments, essential steps, main mechanisms, critical reasoning chains.]
 
 ### Focused
-[2-3 sentences describing the user's PRIMARY interest areas that can be moderately compressed. This should be the bulk of extraction. Describe abstract patterns and themes the user cares about. Be generous in interpreting what the user wants - this is the main extraction target.]
+[2-3 sentences describing the user's PRIMARY interest areas that can be moderately compressed. This should be the bulk of extraction. Describe abstract patterns and themes the user cares about.]
 
 ### Relevant
-[1-2 sentences describing SECONDARY interest areas that are useful but not essential - can be dropped if needed. Examples: supporting examples, background context, supplementary details. Think about what provides helpful context but isn't the user's main focus.]
+[1-2 sentences describing SECONDARY interest areas that are useful but not essential - can be dropped if needed. Examples: supporting examples, background context, supplementary details.]
 
 ### Exclude
 [1-2 sentences describing what the user explicitly does NOT care about or wants to skip. These topics should NOT be extracted as user-focused chunks.]
-
-**Important semantic note:** "Exclude" means "do not extract as user-focused chunks", NOT "delete from final compressed text". Book-coherence extraction (which maintains narrative flow) may still include this content if structurally necessary, and that's fine.
 
 ---
 
@@ -52,10 +33,27 @@ If the user uses verbatim trigger phrases, describe what passages need word-for-
 
 ---
 
-**Important:**
-- Verbatim is LAZY/OPTIONAL - only fill if explicitly requested
-- Detailed, Focused, Relevant are EAGER - actively interpret and expand on user's intention
-- Exclude defines what NOT to extract in user-focused phase (but may still appear in book-coherence)
-- Be specific about types and characteristics of information, not concrete content (you haven't read the book yet)
-- Focus on abstract patterns the downstream AI should look for
-- Think in terms of preservation strategies (how to handle info), not importance ratings (how to judge info)
+**Important Guidelines:**
+
+**Understanding trigger phrases for Verbatim:**
+- Verbatim triggers (entire passages): "一字不漏", "一字不改", "原文照抄", "原样引用", "verbatim", "word-for-word"
+- NOT verbatim triggers (map to Detailed): "必须保留", "完整保留", "保留术语", "精确定义", "must preserve", "keep complete"
+- Critical distinction: Verbatim = entire passages word-for-word. Detailed = specific terms/concepts accurate, but sentences can be rewritten.
+
+**Interpretation approach:**
+- Verbatim: LAZY/OPTIONAL - only fill if explicitly requested at passage-level
+- Detailed, Focused, Relevant: EAGER - actively interpret and expand on user's intention
+- Exclude: Define what NOT to extract (but may still appear in book-coherence phase for narrative flow)
+
+**Describing information types (CRITICAL):**
+- Be specific about **types and characteristics** of information, not concrete content
+- Focus on **abstract patterns** the downstream AI should look for
+- **Do NOT invent specific examples** (character names, event types, specific scenarios) unless the user mentioned them
+- You haven't read the book - downstream AI will see the actual content and match patterns
+- If the user provides examples (e.g., "like generals, advisors"), preserve and rephrase them
+- If the user does NOT provide examples, describe the pattern abstractly without inventing concrete instances
+
+**Example of good vs bad descriptions:**
+- ✅ GOOD: "提取不同人物对主角的态度变化" (abstract pattern)
+- ❌ BAD: "提取不同人物（如将领、谋士、平民）对主角的态度变化" (invented concrete examples)
+- ✅ GOOD (if user mentioned): User said "关注官员和百姓的看法" → "提取官员和百姓等不同社会角色对主角的看法" (preserving user's examples)

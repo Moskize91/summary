@@ -10,7 +10,12 @@ from ..topologization.api import Topologization
 from ..topologization.fragment import FragmentReader, SentenceId
 
 
-def format_clue_as_book(chunks: list, topologization: Topologization, wrap_high_retention: bool = False) -> str:
+def format_clue_as_book(
+    chunks: list,
+    topologization: Topologization,
+    wrap_high_retention: bool = False,
+    full_markup: bool = False,
+) -> str:
     """Format clue chunks as book-like text with XML markup.
 
     Renders all fragments involved in the clue as continuous narrative text,
@@ -22,16 +27,17 @@ def format_clue_as_book(chunks: list, topologization: Topologization, wrap_high_
     Args:
         chunks: List of Chunk objects
         topologization: Topologization object
-        wrap_high_retention: If True, wrap high-retention chunks (verbatim/detailed) in <chunk> tags with source text
+        wrap_high_retention: If True, wrap only high-retention chunks (verbatim/detailed) with simplified tags (for compressor)
+        full_markup: If True, wrap ALL chunks with full XML attributes including label, retention, importance (for reviewer generator)
 
     Returns:
         Book-like text with <chunk> markup and fragment summaries
 
-    Example output:
+    Example output (full_markup=True):
         ```
         Regular unmarked text from fragment...
 
-        <chunk id="123" label="Key event" retention="detailed" importance="critical">
+        <chunk label="Key event" retention="detailed" importance="critical">
         Marked chunk text...
         </chunk>
 
@@ -90,7 +96,9 @@ def format_clue_as_book(chunks: list, topologization: Topologization, wrap_high_
                     result_parts.append(" ".join(skipped_summaries))
 
         # Render the current fragment
-        marked_text = _build_fragment_markup(frag_id, fragment_sentences[frag_id], chunk_coverage, wrap_high_retention)
+        marked_text = _build_fragment_markup(
+            frag_id, fragment_sentences[frag_id], chunk_coverage, wrap_high_retention, full_markup
+        )
         result_parts.append(marked_text)
 
     return "\n\n".join(result_parts)
@@ -101,6 +109,7 @@ def _build_fragment_markup(
     sentences: list[tuple[int, str]],
     chunk_coverage: dict[SentenceId, list],
     wrap_high_retention: bool = False,
+    full_markup: bool = False,
 ) -> str:
     """Build marked-up text for one fragment.
 
@@ -108,7 +117,8 @@ def _build_fragment_markup(
         frag_id: Fragment ID
         sentences: List of (sentence_index, text) tuples
         chunk_coverage: Map from sentence_id to list of Chunk objects
-        wrap_high_retention: If True, wrap high-retention chunks in <chunk> tags
+        wrap_high_retention: If True, wrap only high-retention chunks (verbatim/detailed) with simplified tags
+        full_markup: If True, wrap ALL chunks with full XML attributes
 
     Returns:
         Fragment text with <chunk> markup
@@ -155,15 +165,24 @@ def _build_fragment_markup(
         text_segment = " ".join(sentences[j][1] for j in range(start_idx, end_idx))
 
         if chunk_attrs:
-            # Check if this chunk needs wrapping (for compressor view only)
             retention = chunk_attrs.get("retention")
-            should_wrap = wrap_high_retention and retention in ("verbatim", "detailed")
+            importance = chunk_attrs.get("importance")
+            label = chunk_attrs.get("label")
 
-            if should_wrap:
-                # Wrap with <chunk retention="XXX"> for high-retention chunks
+            if full_markup:
+                # Full markup mode: wrap ALL chunks with complete XML attributes
+                attrs_list = [f'label="{label}"']
+                if retention:
+                    attrs_list.append(f'retention="{retention}"')
+                if importance:
+                    attrs_list.append(f'importance="{importance}"')
+                attrs_str = " ".join(attrs_list)
+                parts.append(f"<chunk {attrs_str}>{text_segment}</chunk>")
+            elif wrap_high_retention and retention in ("verbatim", "detailed"):
+                # Simplified high-retention mode: only wrap verbatim/detailed chunks with retention attribute
                 parts.append(f'<chunk retention="{retention}">{text_segment}</chunk>')
             else:
-                # Normal case: no wrapping, just plain text
+                # No wrapping: plain text
                 parts.append(text_segment)
         else:
             parts.append(text_segment)

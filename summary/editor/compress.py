@@ -178,7 +178,7 @@ def compress_text(
 
     # Step 3: Generate reviewer info for each clue
     print("\nStep 3: Generating clue reviewers...")
-    clue_reviewers = _generate_clue_reviewers(clues, intention, llm, topologization)
+    clue_reviewers = _generate_clue_reviewers(clues, llm, topologization)
     print(f"Generated {len(clue_reviewers)} clue reviewers")
 
     # Step 4: Calculate target length
@@ -400,7 +400,6 @@ def _get_marked_full_text(topologization: Topologization, clues: list[Clue]) -> 
 
 def _generate_clue_reviewers(
     clues: list[Clue],
-    intention: str,
     llm: LLM,
     topologization: Topologization,
 ) -> list[ClueReviewerInfo]:
@@ -408,7 +407,6 @@ def _generate_clue_reviewers(
 
     Args:
         clues: List of Clue objects (already weight-normalized)
-        intention: User's reading intention
         llm: LLM instance
         topologization: Topologization object (for formatting chunks)
 
@@ -427,11 +425,11 @@ def _generate_clue_reviewers(
             print(f"    Merged from snakes: {clue.source_snake_ids}")
 
         # Format chunks as book-like text with XML markup
-        clue_text = format_clue_as_book(clue.chunks, topologization)
+        clue_text = format_clue_as_book(clue.chunks, topologization, full_markup=True)
 
         # Generate reviewer strategy
         info_system_prompt = llm.load_system_prompt(info_prompt_path)
-        user_message = f"User's reading intention:\n{intention}\n\n---\n\nClue text:\n{clue_text}"
+        user_message = clue_text
 
         info_response = llm.request(
             system_prompt=info_system_prompt,
@@ -486,11 +484,6 @@ def _compress_iteration(
         - full_response: Complete AI response including Working Notes
         - compressed_text: Extracted compressed text only
     """
-    # Format thread summaries
-    thread_summaries = "\n\n".join(
-        [f"**Thread {cr.clue_id} (weight: {cr.weight:.2f}):**\n{cr.reviewer_info}" for cr in clue_reviewers]
-    )
-
     # Load prompt template (no longer includes revision_feedback)
     prompt_path = Path(__file__).parent.parent / "data" / "editor" / "text_compressor.jinja"
     system_prompt = llm.load_system_prompt(
@@ -498,7 +491,6 @@ def _compress_iteration(
         original_length=len(marked_text),
         target_length=target_length,
         compression_ratio=int(compression_ratio * 100),
-        thread_summaries=thread_summaries,
     )
 
     # Build messages based on iteration
