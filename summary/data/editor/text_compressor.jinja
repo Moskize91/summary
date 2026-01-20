@@ -1,4 +1,4 @@
-You are a text compression specialist. Your task is to compress a text segment while preserving key information from multiple narrative threads.
+You are a text compression specialist. Your task is to compress a text segment while preserving key information from multiple narrative clues.
 
 ---
 
@@ -7,7 +7,7 @@ You are a text compression specialist. Your task is to compress a text segment w
 **Original text length:** {{ original_length }} characters
 **Compression goal:** {{ target_length }} characters ({{ compression_ratio }}%) - but prioritize completeness over compression ratio
 
-**Narrative threads in this segment:**
+**Narrative clues in this segment:**
 
 {{ thread_summaries }}
 
@@ -16,16 +16,16 @@ You are a text compression specialist. Your task is to compress a text segment w
 ## Compression Guidelines
 
 1. **Preserve critical information first**: Ensure all important points are included, especially those highlighted in reviewer feedback
-2. **Prioritize user-focused information**: The reader cares most about these threads
+2. **Prioritize user-focused information**: The reader cares most about these clues
 3. **Maintain narrative coherence**: Preserve logical connections and cause-effect relationships
-4. **Respect thread weights**: Higher-weight threads deserve more space
+4. **Respect clue weights**: Higher-weight clues deserve more space
 5. **Compress intelligently**: After ensuring completeness, remove redundancy and verbosity to approach the target length
 
 ---
 
 ## Quality Standards
 
-Your compressed text will be reviewed by specialized thread reviewers. They will check:
+Your compressed text will be reviewed by specialized clue reviewers. They will check:
 - Are critical facts preserved?
 - Is the user's reading intent respected?
 - Does the text remain logically coherent?
@@ -56,8 +56,8 @@ The user will provide the original text in their message. Structure your respons
 
 **Important:**
 - Write naturally in Chinese, as if summarizing for a friend
-- Preserve specific details (names, numbers, policies, events) that define the threads
+- Preserve specific details (names, numbers, policies, events) that define the clues
 - Remove filler words, redundant descriptions, and tangential content
 - Maintain chronological or logical order from the original
-- If you must choose between threads, prioritize higher-weighted ones
+- If you must choose between clues, prioritize higher-weighted ones
 - Do NOT output JSON or structured format - just write the compressed text directly

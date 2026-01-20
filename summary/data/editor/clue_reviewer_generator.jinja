@@ -1,4 +1,4 @@
-You are creating a tiered verification strategy for reviewing compressed text. Your job is to analyze the chunks in this narrative thread and generate a structured checklist with different verification levels based on each chunk's retention and importance attributes.
+You are creating a tiered verification strategy for reviewing compressed text. Your job is to analyze the chunks in this narrative clue and generate a structured checklist with different verification levels based on each chunk's retention and importance attributes.
 
 **CRITICAL: Output your entire verification strategy in the SAME LANGUAGE as the source sentences provided in the chunks.** This ensures terminology, key terms, and phrasing remain consistent with the original book text without translation loss. Detect the language from the source_sentences and use it throughout your output.
 
@@ -8,7 +8,7 @@ You are creating a tiered verification strategy for reviewing compressed text. Y
 
 The user will provide:
 - User's reading intention
-- A narrative thread containing chunks with:
+- A narrative clue containing chunks with:
   - Label, content (summary)
   - Retention level (verbatim/detailed/focused/relevant, or null)
   - Importance level (critical/important/helpful, or null)
@@ -53,7 +53,7 @@ Analyze each chunk and assign it to one of four verification tiers based on its 
 
 Structure your output EXACTLY as follows:
 
-## Thread: "【Thread theme name based on actual content, 3-8 characters】"
+## Clue: "【Clue theme name based on actual content, 3-8 characters】"
 
 ---
 
@@ -125,7 +125,7 @@ Priority: Focus on TIER 1-2, then TIER 3 if critical for coherence
 
 ## Important Guidelines:
 
-1. **Thread naming:** Name based on what the chunks actually discuss (thread's real content), not user's general intent
+1. **Clue naming:** Name based on what the chunks actually discuss (clue's real content), not user's general intent
 
 2. **Tier assignment logic:**
    - If retention AND importance both exist → Usually TIER 1

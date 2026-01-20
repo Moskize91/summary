@@ -10,6 +10,7 @@ from json_repair import repair_json
 
 from ..llm import LLM
 from ..topologization.api import Topologization
+from .clue import Clue, extract_clues_from_topologization
 
 
 def _extract_json_from_markdown(text: str) -> str:
@@ -91,10 +92,10 @@ def _extract_thinking_text(full_response: str) -> str:
 
 
 @dataclass
-class SnakeReviewerInfo:
-    """Information about a snake for reviewing compressed text."""
+class ClueReviewerInfo:
+    """Information about a clue for reviewing compressed text."""
 
-    snake_id: int
+    clue_id: int
     weight: float
     label: str  # Simple label like "first_label → last_label"
     reviewer_info: str  # Natural language review guidelines
@@ -104,7 +105,7 @@ class SnakeReviewerInfo:
 class ReviewResult:
     """Result from a single reviewer."""
 
-    snake_id: int
+    clue_id: int
     weight: float
     issues: list[dict]  # List of issue dicts with type, severity, missing_info/problem, suggestion
 
@@ -125,6 +126,7 @@ def compress_text(
     llm: LLM,
     compression_ratio: float = 0.2,
     max_iterations: int = 5,
+    max_clues: int = 10,
     log_dir_path: Path | None = None,
 ) -> str:
     """Compress text from topologization using iterative refinement.
@@ -135,6 +137,7 @@ def compress_text(
         llm: LLM instance
         compression_ratio: Target compression ratio (default: 0.2 = 20%)
         max_iterations: Number of iterations (default: 5)
+        max_clues: Maximum number of clues (narrative threads) to generate (default: 10)
         log_dir_path: Directory for compression logs (default: None, no logging)
 
     Returns:
@@ -162,21 +165,26 @@ def compress_text(
     original_text = _get_full_text(topologization)
     print(f"Original text length: {len(original_text)} characters")
 
-    # Step 2: Generate reviewer info for each snake
-    print("\nStep 2: Generating snake reviewers...")
-    snake_reviewers = _generate_snake_reviewers(topologization, intention, llm)
-    print(f"Generated {len(snake_reviewers)} snake reviewers")
+    # Step 2: Extract clues from topologization (with merging)
+    print("\nStep 2: Extracting clues from topologization...")
+    clues = extract_clues_from_topologization(topologization, max_clues=max_clues)
+    print(f"Extracted {len(clues)} clues (max: {max_clues}) from {len(list(topologization.snake_graph))} snakes")
 
-    # Step 3: Calculate target length
+    # Step 3: Generate reviewer info for each clue
+    print("\nStep 3: Generating clue reviewers...")
+    clue_reviewers = _generate_clue_reviewers(clues, intention, llm, topologization)
+    print(f"Generated {len(clue_reviewers)} clue reviewers")
+
+    # Step 4: Calculate target length
     target_length = int(len(original_text) * compression_ratio)
     print(f"Target length: {target_length} characters ({compression_ratio:.0%} compression)")
 
-    # Step 4: Iterative compression - always run max_iterations times
-    print(f"\nStep 3: Iterative compression ({max_iterations} iterations)...")
+    # Step 5: Iterative compression - always run max_iterations times
+    print(f"\nStep 4: Iterative compression ({max_iterations} iterations)...")
     versions: list[CompressionVersion] = []
     previous_compressed_text: str | None = None
     revision_feedback: str | None = None
-    reviewer_histories: dict[int, tuple[str, str]] = {}  # snake_id -> (prev_compressed_text, prev_response)
+    reviewer_histories: dict[int, tuple[str, str]] = {}  # clue_id -> (prev_compressed_text, prev_response)
 
     for iteration in range(1, max_iterations + 1):
         print(f"\n--- Iteration {iteration}/{max_iterations} ---")
@@ -187,10 +195,9 @@ def compress_text(
             original_text=original_text,
             target_length=target_length,
             compression_ratio=compression_ratio,
-            snake_reviewers=snake_reviewers,
+            clue_reviewers=clue_reviewers,
             previous_compressed_text=previous_compressed_text,
             revision_feedback=revision_feedback,
-            intention=intention,
             llm=llm,
         )
         print(f"Compressed to {len(compressed_text)} characters")
@@ -227,8 +234,7 @@ def compress_text(
         print("Reviewing compressed text...")
         reviews, raw_responses = _review_compression(
             compressed_text=compressed_text,
-            snake_reviewers=snake_reviewers,
-            intention=intention,
+            clue_reviewers=clue_reviewers,
             llm=llm,
             reviewer_histories=reviewer_histories if reviewer_histories else None,
         )
@@ -254,14 +260,14 @@ def compress_text(
                 f.write(f"{'-' * 80}\n")
                 f.write(f"Issue Score: {score:.2f} (lower is better)\n\n")
 
-                # Log all snake reviewers (including failed ones)
-                for sr in snake_reviewers:
+                # Log all clue reviewers (including failed ones)
+                for cr in clue_reviewers:
                     # Find corresponding review result
-                    review = next((r for r in reviews if r.snake_id == sr.snake_id), None)
+                    review = next((r for r in reviews if r.clue_id == cr.clue_id), None)
 
-                    f.write(f"Snake {sr.snake_id} (weight: {sr.weight:.2f}):\n")
-                    f.write(f"  Label: {sr.label}\n")
-                    f.write(f"  Reviewer:\n{sr.reviewer_info}\n")
+                    f.write(f"Clue {cr.clue_id} (weight: {cr.weight:.2f}):\n")
+                    f.write(f"  Label: {cr.label}\n")
+                    f.write(f"  Reviewer:\n{cr.reviewer_info}\n")
 
                     if review is None:
                         f.write("  ❌ REVIEW FAILED - No response from LLM or parse error\n")
@@ -309,8 +315,8 @@ def compress_text(
             previous_compressed_text = compressed_text
 
             # Update reviewer histories for next iteration
-            for snake_id, raw_response in raw_responses.items():
-                reviewer_histories[snake_id] = (compressed_text, raw_response)
+            for clue_id, raw_response in raw_responses.items():
+                reviewer_histories[clue_id] = (compressed_text, raw_response)
 
     # Step 5: Select best version (lowest score)
     if not versions:
@@ -354,8 +360,6 @@ def _get_full_text(topologization: Topologization) -> str:
 
     all_sentences = []
     for fragment_file in fragment_files:
-        import json
-
         with open(fragment_file, encoding="utf-8") as f:
             sentences = json.load(f)
             for sentence in sentences:
@@ -364,38 +368,36 @@ def _get_full_text(topologization: Topologization) -> str:
     return " ".join(all_sentences)
 
 
-def _generate_snake_reviewers(
-    topologization: Topologization,
+def _generate_clue_reviewers(
+    clues: list[Clue],
     intention: str,
     llm: LLM,
-) -> list[SnakeReviewerInfo]:
-    """Generate reviewer info for each snake.
+    topologization: Topologization,
+) -> list[ClueReviewerInfo]:
+    """Generate reviewer info for each clue.
 
     Args:
-        topologization: Topologization object
+        clues: List of Clue objects (already weight-normalized)
         intention: User's reading intention
         llm: LLM instance
+        topologization: Topologization object (for formatting chunks)
 
     Returns:
-        List of SnakeReviewerInfo objects
+        List of ClueReviewerInfo objects
     """
-    snake_reviewers = []
+    clue_reviewers = []
 
     # Find prompt template
-    info_prompt_path = Path(__file__).parent.parent / "data" / "editor" / "thread_reviewer_generator.jinja"
+    info_prompt_path = Path(__file__).parent.parent / "data" / "editor" / "clue_reviewer_generator.jinja"
 
-    for snake in topologization.snake_graph:
-        print(f"  Processing snake {snake.snake_id}: {snake.first_label} → {snake.last_label}")
-
-        # Read weight from snake data structure
-        weight = snake.weight
-        print(f"    Weight: {weight:.2f}")
-
-        # Get chunks for this snake
-        chunks = snake.get_chunks()
+    for clue in clues:
+        print(f"  Processing clue {clue.clue_id}: {clue.label}")
+        print(f"    Weight: {clue.weight:.2f}")
+        if clue.is_merged:
+            print(f"    Merged from snakes: {clue.source_snake_ids}")
 
         # Format chunks as JSON with complete metadata
-        chunks_json = _format_chunks_as_json(chunks, topologization)
+        chunks_json = _format_chunks_as_json(clue.chunks, topologization)
 
         # Generate reviewer strategy
         info_system_prompt = llm.load_system_prompt(info_prompt_path)
@@ -408,33 +410,25 @@ def _generate_snake_reviewers(
         )
 
         if not info_response:
-            raise RuntimeError(f"Snake {snake.snake_id} reviewer info generation failed: LLM returned empty response")
+            raise RuntimeError(f"Clue {clue.clue_id} reviewer info generation failed: LLM returned empty response")
 
         reviewer_info = info_response.strip()
         print(f"    Reviewer strategy generated ({len(reviewer_info)} chars)")
 
-        # Generate simple label
-        label = f"{snake.first_label} → {snake.last_label}"
-
-        snake_reviewers.append(
-            SnakeReviewerInfo(
-                snake_id=snake.snake_id,
-                weight=weight,
-                label=label,
+        clue_reviewers.append(
+            ClueReviewerInfo(
+                clue_id=clue.clue_id,
+                weight=clue.weight,
+                label=clue.label,
                 reviewer_info=reviewer_info,
             )
         )
 
-    # Normalize weights so they sum to 1.0
-    total_weight = sum(sr.weight for sr in snake_reviewers)
-    if total_weight > 0:
-        for sr in snake_reviewers:
-            sr.weight = sr.weight / total_weight
-        print("\n  Normalized weights (sum = 1.0):")
-        for sr in snake_reviewers:
-            print(f"    Snake {sr.snake_id}: {sr.weight:.3f}")
+    print("\n  Clue weights (already normalized, sum = 1.0):")
+    for cr in clue_reviewers:
+        print(f"    Clue {cr.clue_id}: {cr.weight:.3f}")
 
-    return snake_reviewers
+    return clue_reviewers
 
 
 def _format_chunks_as_json(chunks: list, topologization: Topologization) -> str:
@@ -470,10 +464,9 @@ def _compress_iteration(
     original_text: str,
     target_length: int,
     compression_ratio: float,
-    snake_reviewers: list[SnakeReviewerInfo],
+    clue_reviewers: list[ClueReviewerInfo],
     previous_compressed_text: str | None,
     revision_feedback: str | None,
-    intention: str,
     llm: LLM,
 ) -> tuple[str, str]:
     """Perform one compression iteration.
@@ -482,10 +475,9 @@ def _compress_iteration(
         original_text: Original text to compress
         target_length: Target length in characters
         compression_ratio: Compression ratio
-        snake_reviewers: List of snake reviewer info
+        clue_reviewers: List of clue reviewer info
         previous_compressed_text: Previous iteration's compressed text (None for first iteration)
         revision_feedback: Feedback from previous iteration (None for first iteration)
-        intention: User's reading intention
         llm: LLM instance
 
     Returns:
@@ -495,7 +487,7 @@ def _compress_iteration(
     """
     # Format thread summaries
     thread_summaries = "\n\n".join(
-        [f"**Thread {sr.snake_id} (weight: {sr.weight:.2f}):**\n{sr.reviewer_info}" for sr in snake_reviewers]
+        [f"**Thread {cr.clue_id} (weight: {cr.weight:.2f}):**\n{cr.reviewer_info}" for cr in clue_reviewers]
     )
 
     # Load prompt template (no longer includes revision_feedback)
@@ -543,40 +535,38 @@ def _compress_iteration(
 
 def _review_compression(
     compressed_text: str,
-    snake_reviewers: list[SnakeReviewerInfo],
-    intention: str,
+    clue_reviewers: list[ClueReviewerInfo],
     llm: LLM,
     reviewer_histories: dict[int, tuple[str, str]] | None = None,
 ) -> tuple[list[ReviewResult], dict[int, str]]:
-    """Review compressed text with all snake reviewers.
+    """Review compressed text with all clue reviewers.
 
     Args:
         compressed_text: Compressed text to review
-        snake_reviewers: List of snake reviewer info
-        intention: User's reading intention
+        clue_reviewers: List of clue reviewer info
         llm: LLM instance
-        reviewer_histories: Optional dict mapping snake_id to (previous_compressed_text, previous_response)
+        reviewer_histories: Optional dict mapping clue_id to (previous_compressed_text, previous_response)
 
     Returns:
         Tuple of (reviews, raw_responses):
         - reviews: List of ReviewResult objects
-        - raw_responses: Dict mapping snake_id to raw response text
+        - raw_responses: Dict mapping clue_id to raw response text
     """
     reviews = []
     raw_responses = {}
-    prompt_path = Path(__file__).parent.parent / "data" / "editor" / "thread_reviewer.jinja"
+    prompt_path = Path(__file__).parent.parent / "data" / "editor" / "clue_reviewer.jinja"
 
-    for sr in snake_reviewers:
+    for cr in clue_reviewers:
         system_prompt = llm.load_system_prompt(
             prompt_path,
-            thread_info=sr.reviewer_info,
+            thread_info=cr.reviewer_info,
         )
 
         # Check if this reviewer has history
-        has_history = reviewer_histories is not None and sr.snake_id in reviewer_histories
+        has_history = reviewer_histories is not None and cr.clue_id in reviewer_histories
 
         if has_history:
-            prev_compressed_text, prev_response = reviewer_histories[sr.snake_id]
+            prev_compressed_text, prev_response = reviewer_histories[cr.clue_id]
             # Build conversation history: system + user(prev) + assistant(prev) + user(current)
             # All user messages contain only compressed text, no intention
             messages = [
@@ -598,29 +588,29 @@ def _review_compression(
             )
 
         if not response:
-            raise RuntimeError(f"Snake {sr.snake_id} review failed: LLM returned empty response")
+            raise RuntimeError(f"Clue {cr.clue_id} review failed: LLM returned empty response")
 
         # Store raw response
-        raw_responses[sr.snake_id] = response
+        raw_responses[cr.clue_id] = response
 
         try:
             review_json = _extract_json_from_markdown(response)
             review_data = json.loads(repair_json(review_json))
         except json.JSONDecodeError as e:
-            raise RuntimeError(f"Snake {sr.snake_id} review failed: JSON parse error - {e}") from e
+            raise RuntimeError(f"Clue {cr.clue_id} review failed: JSON parse error - {e}") from e
 
         try:
             issues = review_data.get("issues", [])
             reviews.append(
                 ReviewResult(
-                    snake_id=sr.snake_id,
-                    weight=sr.weight,
+                    clue_id=cr.clue_id,
+                    weight=cr.weight,
                     issues=issues,
                 )
             )
-            print(f"  Snake {sr.snake_id}: {len(issues)} issues")
+            print(f"  Clue {cr.clue_id}: {len(issues)} issues")
         except (ValueError, KeyError) as e:
-            raise RuntimeError(f"Snake {sr.snake_id} review failed: Invalid data format - {e}") from e
+            raise RuntimeError(f"Clue {cr.clue_id} review failed: Invalid data format - {e}") from e
 
     return reviews, raw_responses
 
