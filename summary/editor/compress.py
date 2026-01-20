@@ -171,6 +171,11 @@ def compress_text(
     clues = extract_clues_from_topologization(topologization, max_clues=max_clues)
     print(f"Extracted {len(clues)} clues (max: {max_clues}) from {len(list(topologization.snake_graph))} snakes")
 
+    # Step 2.5: Generate marked text for compression (with high-retention chunks wrapped)
+    print("\nStep 2.5: Generating marked text for compression...")
+    marked_original_text = _get_marked_full_text(topologization, clues)
+    print(f"Marked text length: {len(marked_original_text)} characters")
+
     # Step 3: Generate reviewer info for each clue
     print("\nStep 3: Generating clue reviewers...")
     clue_reviewers = _generate_clue_reviewers(clues, intention, llm, topologization)
@@ -207,7 +212,7 @@ def compress_text(
         # 4.1 Compress text
         print("Compressing text...")
         full_response, compressed_text = _compress_iteration(
-            original_text=original_text,
+            marked_text=marked_original_text,
             target_length=target_length,
             compression_ratio=compression_ratio,
             clue_reviewers=clue_reviewers,
@@ -354,11 +359,43 @@ def _get_full_text(topologization: Topologization) -> str:
     all_sentences = []
     for fragment_file in fragment_files:
         with open(fragment_file, encoding="utf-8") as f:
-            sentences = json.load(f)
-            for sentence in sentences:
-                all_sentences.append(sentence["text"])
+            fragment_data = json.load(f)
+
+        # Handle both old format (list) and new format (dict with "sentences")
+        if isinstance(fragment_data, list):
+            sentences = fragment_data
+        else:
+            sentences = fragment_data["sentences"]
+
+        for sentence in sentences:
+            all_sentences.append(sentence["text"])
 
     return " ".join(all_sentences)
+
+
+def _get_marked_full_text(topologization: Topologization, clues: list[Clue]) -> str:
+    """Get full original text with high-retention chunks marked.
+
+    Wraps verbatim/detailed retention chunks in <chunk retention="XXX"> tags
+    to signal the compressor that these parts need special preservation.
+
+    Args:
+        topologization: Topologization object
+        clues: List of Clue objects with chunks
+
+    Returns:
+        Full text string with high-retention chunks wrapped in <chunk> tags
+    """
+    # Collect all chunks from all clues
+    all_chunks = []
+    for clue in clues:
+        all_chunks.extend(clue.chunks)
+
+    # Use format_clue_as_book with wrap_high_retention=True
+    # This will format the entire text with only high-retention chunks marked
+    marked_text = format_clue_as_book(all_chunks, topologization, wrap_high_retention=True)
+
+    return marked_text
 
 
 def _generate_clue_reviewers(
@@ -425,7 +462,7 @@ def _generate_clue_reviewers(
 
 
 def _compress_iteration(
-    original_text: str,
+    marked_text: str,
     target_length: int,
     compression_ratio: float,
     clue_reviewers: list[ClueReviewerInfo],
@@ -436,7 +473,7 @@ def _compress_iteration(
     """Perform one compression iteration.
 
     Args:
-        original_text: Original text to compress
+        marked_text: Marked original text with high-retention chunks wrapped in <chunk> tags
         target_length: Target length in characters
         compression_ratio: Compression ratio
         clue_reviewers: List of clue reviewer info
@@ -458,15 +495,15 @@ def _compress_iteration(
     prompt_path = Path(__file__).parent.parent / "data" / "editor" / "text_compressor.jinja"
     system_prompt = llm.load_system_prompt(
         prompt_path,
-        original_length=len(original_text),
+        original_length=len(marked_text),
         target_length=target_length,
         compression_ratio=int(compression_ratio * 100),
         thread_summaries=thread_summaries,
     )
 
     # Build messages based on iteration
-    # User message contains only the original text, no intention
-    user_message = original_text
+    # User message contains the marked original text
+    user_message = marked_text
 
     if previous_compressed_text is None or revision_feedback is None:
         # First iteration: simple request

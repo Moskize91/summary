@@ -7,21 +7,25 @@ Handles fragment loading, chunk overlap merging, and non-continuous chunk splitt
 import json
 
 from ..topologization.api import Topologization
-from ..topologization.fragment import SentenceId
+from ..topologization.fragment import FragmentReader, SentenceId
 
 
-def format_clue_as_book(chunks: list, topologization: Topologization) -> str:
+def format_clue_as_book(chunks: list, topologization: Topologization, wrap_high_retention: bool = False) -> str:
     """Format clue chunks as book-like text with XML markup.
 
     Renders all fragments involved in the clue as continuous narrative text,
     with chunk boundaries marked using XML-style tags containing metadata.
 
+    For fragments that are skipped between clue fragments, inserts their summaries
+    as natural transition paragraphs.
+
     Args:
         chunks: List of Chunk objects
         topologization: Topologization object
+        wrap_high_retention: If True, wrap high-retention chunks (verbatim/detailed) in <chunk> tags with source text
 
     Returns:
-        Book-like text with <chunk> markup
+        Book-like text with <chunk> markup and fragment summaries
 
     Example output:
         ```
@@ -30,6 +34,8 @@ def format_clue_as_book(chunks: list, topologization: Topologization) -> str:
         <chunk id="123" label="Key event" retention="detailed" importance="critical">
         Marked chunk text...
         </chunk>
+
+        [Fragment summary for skipped fragments 2-3]
 
         More unmarked text...
         ```
@@ -43,12 +49,18 @@ def format_clue_as_book(chunks: list, topologization: Topologization) -> str:
     # Step 2: Load all sentences from these fragments
     fragments_dir = topologization.workspace_path / "fragments"
     fragment_sentences: dict[int, list[tuple[int, str]]] = {}  # fragment_id -> [(sentence_index, text), ...]
+    fragment_reader = FragmentReader(topologization.workspace_path)
 
     for frag_id in fragment_ids:
         fragment_path = fragments_dir / f"fragment_{frag_id}.json"
         with open(fragment_path, encoding="utf-8") as f:
-            sentences = json.load(f)
-        fragment_sentences[frag_id] = [(i, s["text"]) for i, s in enumerate(sentences)]
+            fragment_data = json.load(f)
+
+        # Handle both old format (list) and new format (dict with "sentences")
+        if isinstance(fragment_data, list):
+            fragment_sentences[frag_id] = [(i, s["text"]) for i, s in enumerate(fragment_data)]
+        else:
+            fragment_sentences[frag_id] = [(i, s["text"]) for i, s in enumerate(fragment_data["sentences"])]
 
     # Step 3: Build chunk coverage map - handle overlaps
     # chunk_coverage: dict mapping (fragment_id, sentence_index) -> list of Chunk objects
@@ -59,10 +71,26 @@ def format_clue_as_book(chunks: list, topologization: Topologization) -> str:
                 chunk_coverage[sid] = []
             chunk_coverage[sid].append(chunk)
 
-    # Step 4: Render all fragments with markup
+    # Step 4: Render all fragments with markup, inserting summaries for skipped fragments
     result_parts = []
-    for frag_id in fragment_ids:
-        marked_text = _build_fragment_markup(frag_id, fragment_sentences[frag_id], chunk_coverage)
+    for i, frag_id in enumerate(fragment_ids):
+        # Check if there are skipped fragments before this one
+        if i > 0:
+            prev_frag_id = fragment_ids[i - 1]
+            # If there's a gap (skipped fragments), insert their summaries
+            if frag_id > prev_frag_id + 1:
+                skipped_summaries = []
+                for skipped_id in range(prev_frag_id + 1, frag_id):
+                    summary = fragment_reader.get_summary(skipped_id)
+                    if summary:  # Only add non-empty summaries
+                        skipped_summaries.append(summary)
+
+                # Combine all skipped summaries into one natural paragraph
+                if skipped_summaries:
+                    result_parts.append(" ".join(skipped_summaries))
+
+        # Render the current fragment
+        marked_text = _build_fragment_markup(frag_id, fragment_sentences[frag_id], chunk_coverage, wrap_high_retention)
         result_parts.append(marked_text)
 
     return "\n\n".join(result_parts)
@@ -72,6 +100,7 @@ def _build_fragment_markup(
     frag_id: int,
     sentences: list[tuple[int, str]],
     chunk_coverage: dict[SentenceId, list],
+    wrap_high_retention: bool = False,
 ) -> str:
     """Build marked-up text for one fragment.
 
@@ -79,6 +108,7 @@ def _build_fragment_markup(
         frag_id: Fragment ID
         sentences: List of (sentence_index, text) tuples
         chunk_coverage: Map from sentence_id to list of Chunk objects
+        wrap_high_retention: If True, wrap high-retention chunks in <chunk> tags
 
     Returns:
         Fragment text with <chunk> markup
@@ -125,15 +155,16 @@ def _build_fragment_markup(
         text_segment = " ".join(sentences[j][1] for j in range(start_idx, end_idx))
 
         if chunk_attrs:
-            # Format attributes for XML tag
-            attrs_parts = [f'label="{chunk_attrs["label"]}"']
-            if chunk_attrs["retention"]:
-                attrs_parts.append(f'retention="{chunk_attrs["retention"]}"')
-            if chunk_attrs["importance"]:
-                attrs_parts.append(f'importance="{chunk_attrs["importance"]}"')
-            attrs_str = " ".join(attrs_parts)
+            # Check if this chunk needs wrapping (for compressor view only)
+            retention = chunk_attrs.get("retention")
+            should_wrap = wrap_high_retention and retention in ("verbatim", "detailed")
 
-            parts.append(f"<chunk {attrs_str}>{text_segment}</chunk>")
+            if should_wrap:
+                # Wrap with <chunk retention="XXX"> for high-retention chunks
+                parts.append(f'<chunk retention="{retention}">{text_segment}</chunk>')
+            else:
+                # Normal case: no wrapping, just plain text
+                parts.append(text_segment)
         else:
             parts.append(text_segment)
 

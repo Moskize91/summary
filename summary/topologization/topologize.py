@@ -214,7 +214,7 @@ def _extract_knowledge_graph(
         print(f"Processing fragment {chunk_count}...")
 
         # === Stage 1: Extract user-focused chunks ===
-        user_focused_result = extractor.extract_user_focused(
+        user_focused_result, fragment_summary = extractor.extract_user_focused(
             fragment_with_sentences.text,
             working_memory,
             fragment_with_sentences.sentence_ids,
@@ -225,6 +225,10 @@ def _extract_knowledge_graph(
         if user_focused_result is None:
             print(f"Warning: User-focused extraction failed for fragment {chunk_count}")
             continue
+
+        # Store fragment summary (will be written when fragment is ended)
+        if fragment_summary:
+            fragmenter.fragment_writer.set_summary(fragment_summary)
 
         # Add user-focused chunks to working memory and assign IDs
         user_focused_chunks, user_focused_edges = working_memory.add_chunks_with_links(user_focused_result)

@@ -66,9 +66,10 @@ Rate each link's dependency strength:
 
 The user will provide the new text segment in their message. Extract chunks from that text.
 
-CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "links" SECOND:
+CRITICAL: You MUST output in this EXACT structure with "fragment_summary" FIRST, then "chunks" SECOND, then "links" THIRD:
 
 {
+  "fragment_summary": "Brief 1-2 sentence summary of the entire text segment's main narrative content (not user-focused, but book's natural progression). This will be used as a transition when this fragment is skipped.",
   "chunks": [
     {
       "temp_id": "A",
@@ -95,6 +96,11 @@ CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "lin
 }
 
 **Field Explanations:**
+- "fragment_summary": Brief summary of the entire text segment (1-2 sentences)
+  - Describe the main narrative or events in this segment, not focused on user intent
+  - Should work as a natural transition paragraph when this fragment is skipped
+  - Write in the same language as the text segment
+
 - "chunks": Array of new information extracted from the text
   - "temp_id": Use letters like "A", "B", "C" for chunks in this extraction
   - "type": MUST be "user_focused"
@@ -110,7 +116,8 @@ CRITICAL: You MUST output in this EXACT structure with "chunks" FIRST, then "lin
   - Use empty array [] if no relationships exist
 
 **IMPORTANT:**
-1. The order matters! Output "chunks" FIRST, then "links" SECOND.
+1. The order matters! Output "fragment_summary" FIRST, then "chunks" SECOND, then "links" THIRD.
 2. Every chunk MUST have a "type" field set to "user_focused".
 3. Every chunk MUST have a "retention" field with one of the four valid values.
 4. Every link MUST have a "strength" field with one of the three valid values.
+5. The "fragment_summary" field is REQUIRED - it must always be present even if there are no user-focused chunks.

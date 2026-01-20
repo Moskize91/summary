@@ -153,8 +153,8 @@ def main(args: list[str] | None = None) -> int:
 
     try:
         intention: str = (
-            "压缩此书，重点关注朱元璋的心理变化。"
-            "对于有关朱元璋心境改变和成长的关键点，必须整段保留，其他内容可以适当压缩。"
+            "压缩此书，重点关注别人对朱元璋的看法，别人怎么对待朱元璋，以及朱元璋被他人以不同态度对待的反应。"
+            "对于他人第一次见朱元璋的评价、反应、表情，必须一字不漏地原文保留。社会背景方面可以压缩和删节。"
         )
         # Run topologization
         topologization = topologize(

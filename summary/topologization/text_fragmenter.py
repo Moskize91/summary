@@ -81,6 +81,10 @@ class TextFragmenter:
     def stream_fragments_from_file(self, file_path: Path) -> Generator[FragmentWithSentences, None, None]:
         """Stream text fragments from a file using spacy's pipe() for efficient processing.
 
+        NOTE: Fragments are yielded with fragment_writer still open (fragment not ended yet).
+        The caller should call set_summary() if needed, then the next iteration will end it.
+        The last fragment must be ended by calling finalize().
+
         Args:
             file_path: Path to the text file
 
@@ -92,6 +96,7 @@ class TextFragmenter:
         current_sentence_ids = []
         current_sentence_texts = []
         current_sentence_token_counts = []
+        fragment_pending = False  # Track if there's a fragment waiting to be ended
 
         # Use spacy's pipe() for efficient batch processing
         for doc in self._nlp.pipe(self._generate_text_batches(file_path), batch_size=10):
@@ -105,14 +110,14 @@ class TextFragmenter:
 
                 # Yield fragment if adding sentence would exceed limit
                 if current_fragment and current_fragment_tokens + sentence_token_count > self.max_fragment_tokens:
-                    # End current fragment and yield
-                    self.fragment_writer.end_fragment()
+                    # Yield current fragment (WITHOUT ending it yet - caller can still set_summary)
                     yield FragmentWithSentences(
                         text="".join(current_fragment),
                         sentence_ids=current_sentence_ids.copy(),
                         sentence_texts=current_sentence_texts.copy(),
                         sentence_token_counts=current_sentence_token_counts.copy(),
                     )
+                    fragment_pending = True
                     current_fragment = []
                     current_fragment_tokens = 0
                     current_sentence_ids = []
@@ -121,6 +126,10 @@ class TextFragmenter:
 
                 # Start new fragment if needed (first sentence of new fragment)
                 if not current_fragment:
+                    # End previous fragment if it's still pending
+                    if fragment_pending:
+                        self.fragment_writer.end_fragment()
+                        fragment_pending = False
                     self.fragment_writer.start_fragment()
 
                 # Add sentence to fragment writer with token count and get sentence ID
@@ -132,9 +141,8 @@ class TextFragmenter:
                 current_sentence_texts.append(sentence_text)
                 current_sentence_token_counts.append(sentence_token_count)
 
-        # Yield the last fragment if it exists
+        # Yield the last fragment if it exists (WITHOUT ending it - will be ended in finalize())
         if current_fragment:
-            self.fragment_writer.end_fragment()
             yield FragmentWithSentences(
                 text="".join(current_fragment),
                 sentence_ids=current_sentence_ids.copy(),

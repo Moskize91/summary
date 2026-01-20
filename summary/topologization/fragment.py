@@ -33,6 +33,7 @@ class FragmentWriter:
         self.fragments_dir = workspace_path / "fragments"
         self.next_fragment_id = 1  # Start from 1
         self.current_sentences: list[Sentence] = []
+        self.current_summary: str | None = None  # Summary for current fragment
         self.is_fragment_open = False
 
         # Ensure fragments directory exists
@@ -43,7 +44,21 @@ class FragmentWriter:
         if self.is_fragment_open:
             raise RuntimeError("Cannot start new fragment: previous fragment not ended")
         self.current_sentences = []
+        self.current_summary = None
         self.is_fragment_open = True
+
+    def set_summary(self, summary: str):
+        """Set summary for current fragment.
+
+        Args:
+            summary: Summary text for this fragment
+
+        Raises:
+            RuntimeError: If no fragment is currently open
+        """
+        if not self.is_fragment_open:
+            raise RuntimeError("Cannot set summary: no fragment is open. Call start_fragment() first")
+        self.current_summary = summary
 
     def add_sentence(self, text: str, token_count: int) -> SentenceId:
         """Add sentence to current fragment and return its ID.
@@ -76,17 +91,25 @@ class FragmentWriter:
         if not self.current_sentences:
             # Empty fragment, just close it without writing
             self.is_fragment_open = False
+            self.current_summary = None
             return
 
-        # Write fragment_N.json directly in fragments directory
+        # Write fragment_N.json with sentences and summary
         fragment_path = self.fragments_dir / f"fragment_{self.next_fragment_id}.json"
-        sentence_dicts = [{"text": s.text, "token_count": s.token_count} for s in self.current_sentences]
+
+        # Build fragment data structure
+        fragment_data = {
+            "summary": self.current_summary or "",  # Empty string if no summary provided
+            "sentences": [{"text": s.text, "token_count": s.token_count} for s in self.current_sentences]
+        }
+
         with open(fragment_path, "w", encoding="utf-8") as f:
-            json.dump(sentence_dicts, f, ensure_ascii=False, indent=2)
+            json.dump(fragment_data, f, ensure_ascii=False, indent=2)
 
         # Move to next fragment
         self.next_fragment_id += 1
         self.current_sentences = []
+        self.current_summary = None
         self.is_fragment_open = False
 
     def finalize(self):
@@ -96,9 +119,9 @@ class FragmentWriter:
 
 
 class FragmentReader:
-    """Reads sentence text from fragment files.
+    """Reads sentence text and summaries from fragment files.
 
-    Provides lazy loading of sentence text from workspace fragments.
+    Provides lazy loading of sentence text and fragment summaries from workspace fragments.
     """
 
     def __init__(self, workspace_path: Path):
@@ -127,6 +150,37 @@ class FragmentReader:
         fragment_path = self.fragments_dir / f"fragment_{fragment_id}.json"
 
         with open(fragment_path, encoding="utf-8") as f:
-            sentences = json.load(f)
+            fragment_data = json.load(f)
 
-        return sentences[sentence_index]["text"]
+        # Handle both old format (list of sentences) and new format (dict with summary + sentences)
+        if isinstance(fragment_data, list):
+            # Old format: [{"text": ..., "token_count": ...}, ...]
+            return fragment_data[sentence_index]["text"]
+        else:
+            # New format: {"summary": "...", "sentences": [...]}
+            return fragment_data["sentences"][sentence_index]["text"]
+
+    def get_summary(self, fragment_id: int) -> str:
+        """Load fragment summary.
+
+        Args:
+            fragment_id: Fragment ID
+
+        Returns:
+            Summary text (empty string if not available)
+
+        Raises:
+            FileNotFoundError: If fragment file doesn't exist
+        """
+        fragment_path = self.fragments_dir / f"fragment_{fragment_id}.json"
+
+        with open(fragment_path, encoding="utf-8") as f:
+            fragment_data = json.load(f)
+
+        # Handle both old format (list of sentences) and new format (dict with summary + sentences)
+        if isinstance(fragment_data, list):
+            # Old format: no summary available
+            return ""
+        else:
+            # New format: {"summary": "...", "sentences": [...]}
+            return fragment_data.get("summary", "")

@@ -36,7 +36,7 @@ class ChunkExtractor:
         chunk_sentence_ids: list[SentenceId],
         chunk_sentence_texts: list[str],
         chunk_sentence_token_counts: list[int],
-    ) -> ChunkBatch | None:
+    ) -> tuple[ChunkBatch | None, str | None]:
         """Extract user-focused chunks from text (Stage 1).
 
         Args:
@@ -47,8 +47,9 @@ class ChunkExtractor:
             chunk_sentence_token_counts: List of token counts corresponding to sentence IDs
 
         Returns:
-            ChunkBatch containing user-focused chunks
-            None if extraction failed
+            Tuple of (ChunkBatch, fragment_summary):
+            - ChunkBatch containing user-focused chunks (None if extraction failed)
+            - fragment_summary string for this fragment (None if extraction failed)
         """
         # Build prompt
         system_prompt = self.llm.load_system_prompt(
@@ -65,10 +66,10 @@ class ChunkExtractor:
         )
 
         if not response:
-            return None
+            return None, None
 
         # Parse and process
-        return self._parse_and_process_chunks(
+        chunk_batch, fragment_summary = self._parse_and_process_chunks(
             response=response,
             chunk_sentence_ids=chunk_sentence_ids,
             chunk_sentence_texts=chunk_sentence_texts,
@@ -76,6 +77,7 @@ class ChunkExtractor:
             expected_type="user_focused",
             metadata_field="retention",
         )
+        return chunk_batch, fragment_summary
 
     def extract_book_coherence(
         self,
@@ -129,7 +131,7 @@ class ChunkExtractor:
             return None
 
         # Parse and process (temp_id should continue from last user_focused letter)
-        return self._parse_and_process_chunks(
+        chunk_batch, _ = self._parse_and_process_chunks(
             response=response,
             chunk_sentence_ids=chunk_sentence_ids,
             chunk_sentence_texts=chunk_sentence_texts,
@@ -137,6 +139,7 @@ class ChunkExtractor:
             expected_type="book_coherence",
             metadata_field="importance",
         )
+        return chunk_batch
 
     def _parse_and_process_chunks(
         self,
@@ -146,7 +149,7 @@ class ChunkExtractor:
         chunk_sentence_token_counts: list[int],
         expected_type: str,
         metadata_field: str,
-    ) -> ChunkBatch | None:
+    ) -> tuple[ChunkBatch | None, str | None]:
         """Parse LLM response and process chunks.
 
         Args:
@@ -158,7 +161,9 @@ class ChunkExtractor:
             metadata_field: Metadata field to extract ("retention" or "importance")
 
         Returns:
-            ChunkBatch or None if parsing failed
+            Tuple of (ChunkBatch, fragment_summary):
+            - ChunkBatch or None if parsing failed
+            - fragment_summary string (only for user_focused, None for book_coherence)
         """
         # Parse JSON response
         try:
@@ -170,6 +175,7 @@ class ChunkExtractor:
             chunks_data = parsed_data.get("chunks", [])
             links_data = parsed_data.get("links", [])
             importance_annotations = parsed_data.get("importance_annotations")  # Only present in Stage 2
+            fragment_summary = parsed_data.get("fragment_summary")  # Only present in user_focused (Stage 1)
 
             chunks = []
             temp_ids = []
@@ -234,18 +240,19 @@ class ChunkExtractor:
                 chunks.append(chunk)
                 temp_ids.append(data.get("temp_id", ""))
 
-            return ChunkBatch(
+            chunk_batch = ChunkBatch(
                 chunks=chunks,
                 temp_ids=temp_ids,
                 links=links_data,  # Keep strength field from LLM
                 order_correct=order_correct,
                 importance_annotations=importance_annotations,
             )
+            return chunk_batch, fragment_summary
 
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             print(f"Failed to parse LLM response: {e}")
             print(f"Response was: {response[:200]}...")
-            return None
+            return None, None
 
     def _parse_json_response(self, response: str, expected_type: str) -> dict:
         """Parse JSON from LLM response.
@@ -257,8 +264,9 @@ class ChunkExtractor:
             expected_type: Expected chunk type ("user_focused" or "book_coherence")
 
         Returns:
-            Parsed JSON data as dict with "chunks" and "links" keys
-            (and "importance_annotations" for book_coherence)
+            Parsed JSON data as dict:
+            - For user_focused: {"fragment_summary", "chunks", "links"}
+            - For book_coherence: {"importance_annotations", "chunks", "links"}
         """
         # Try to extract JSON object from response
         # Look for JSON object pattern
@@ -267,11 +275,12 @@ class ChunkExtractor:
             json_str = json_match.group(0)
             parsed = json.loads(json_str)
 
-            # For user_focused: ensure chunks and links exist
+            # For user_focused: ensure fragment_summary, chunks and links exist
             if expected_type == "user_focused":
-                if "chunks" not in parsed or "links" not in parsed:
-                    raise ValueError("Missing 'chunks' or 'links' in user_focused response")
+                if "fragment_summary" not in parsed or "chunks" not in parsed or "links" not in parsed:
+                    raise ValueError("Missing 'fragment_summary', 'chunks', or 'links' in user_focused response")
                 return {
+                    "fragment_summary": parsed["fragment_summary"],
                     "chunks": parsed["chunks"],
                     "links": parsed["links"],
                 }
@@ -291,6 +300,7 @@ class ChunkExtractor:
         parsed = json.loads(response)
         if expected_type == "user_focused":
             return {
+                "fragment_summary": parsed["fragment_summary"],
                 "chunks": parsed["chunks"],
                 "links": parsed["links"],
             }
@@ -304,7 +314,7 @@ class ChunkExtractor:
     def _check_json_order(self, response: str, expected_type: str) -> bool:
         """Check if JSON keys appear in correct order.
 
-        For user_focused: chunks before links
+        For user_focused: fragment_summary before chunks before links
         For book_coherence: importance_annotations before chunks before links
 
         Args:
@@ -323,14 +333,15 @@ class ChunkExtractor:
             json_str = json_match.group(0)
 
         if expected_type == "user_focused":
-            # Find positions of "chunks" and "links" keys
+            # Find positions of "fragment_summary", "chunks" and "links" keys
+            summary_pos = json_str.find('"fragment_summary"')
             chunks_pos = json_str.find('"chunks"')
             links_pos = json_str.find('"links"')
 
-            if chunks_pos == -1 or links_pos == -1:
+            if summary_pos == -1 or chunks_pos == -1 or links_pos == -1:
                 return False
 
-            return chunks_pos < links_pos
+            return summary_pos < chunks_pos < links_pos
         else:
             # For book_coherence: check importance_annotations -> chunks -> links
             importance_pos = json_str.find('"importance_annotations"')
