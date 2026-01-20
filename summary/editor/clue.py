@@ -40,10 +40,12 @@ def extract_clues_from_topologization(
     """Extract clues from topologization, merging low-weight snakes.
 
     Strategy:
-    1. Sort all snakes by weight (descending)
-    2. Keep top (max_clues - 1) snakes as individual Clues
-    3. Merge remaining snakes into one Clue
-    4. Re-normalize all weights to sum to 1.0
+    1. Start with all snakes as individual clues
+    2. Repeatedly merge the two lowest-weight clues until count <= max_clues
+    3. Re-normalize all weights to sum to 1.0
+
+    This creates a hierarchical merging where the smallest clues are combined first,
+    ensuring that only the true tail gets merged while significant clues remain independent.
 
     Args:
         topologization: Topologization object with snake graph
@@ -52,41 +54,52 @@ def extract_clues_from_topologization(
     Returns:
         List of Clue objects, sorted by weight (descending)
     """
-    # Get all snakes and sort by weight (descending)
+    # Get all snakes and convert to initial clues
     snakes = list(topologization.snake_graph)
-    snakes.sort(key=lambda s: s.weight, reverse=True)
 
     if not snakes:
         return []
 
-    # If total snakes <= max_clues, no merging needed
-    if len(snakes) <= max_clues:
-        clues = [_convert_snake_to_clue(s, topologization) for s in snakes]
+    # Convert all snakes to individual clues
+    clues = [_convert_snake_to_clue(s, topologization) for s in snakes]
+
+    # If already within limit, no merging needed
+    if len(clues) <= max_clues:
         # Normalize weights
         total_weight = sum(c.weight for c in clues)
         if total_weight > 0:
             for clue in clues:
                 clue.weight = clue.weight / total_weight
+        # Sort by weight descending
+        clues.sort(key=lambda c: c.weight, reverse=True)
         return clues
 
-    # Split into high-weight and low-weight groups
-    # Keep top (max_clues - 1) snakes, merge the rest
-    high_weight_snakes = snakes[: max_clues - 1]
-    low_weight_snakes = snakes[max_clues - 1 :]
+    # Merge smallest clues until we reach max_clues
+    merged_clue_id_counter = -1
+    while len(clues) > max_clues:
+        # Sort by weight ascending to find the two smallest
+        clues.sort(key=lambda c: c.weight)
 
-    # Convert high-weight snakes to individual clues
-    clues = [_convert_snake_to_clue(s, topologization) for s in high_weight_snakes]
+        # Take the two smallest clues
+        clue1 = clues[0]
+        clue2 = clues[1]
 
-    # Merge low-weight snakes into one clue (if any)
-    if low_weight_snakes:
-        merged_clue = _merge_snakes_into_clue(low_weight_snakes, topologization)
+        # Merge them
+        merged_clue = _merge_two_clues(clue1, clue2, merged_clue_id_counter)
+        merged_clue_id_counter -= 1
+
+        # Remove the two original clues and add the merged one
+        clues = clues[2:]  # Remove first two
         clues.append(merged_clue)
 
     # Re-normalize weights
-    clue_total_weight = sum(c.weight for c in clues)
-    if clue_total_weight > 0:
+    total_weight = sum(c.weight for c in clues)
+    if total_weight > 0:
         for clue in clues:
-            clue.weight = clue.weight / clue_total_weight
+            clue.weight = clue.weight / total_weight
+
+    # Sort by weight descending for final output
+    clues.sort(key=lambda c: c.weight, reverse=True)
 
     return clues
 
@@ -145,6 +158,44 @@ def _merge_snakes_into_clue(
 
     # Collect source snake IDs
     source_ids = [s.snake_id for s in snakes]
+
+    return Clue(
+        clue_id=merged_clue_id,
+        weight=total_weight,
+        label=label,
+        chunks=all_chunks,
+        is_merged=True,
+        source_snake_ids=source_ids,
+    )
+
+
+def _merge_two_clues(clue1: Clue, clue2: Clue, merged_clue_id: int) -> Clue:
+    """Merge two clues into one.
+
+    Used in hierarchical merging - either clue may already be a merged clue.
+
+    Args:
+        clue1: First clue to merge
+        clue2: Second clue to merge
+        merged_clue_id: ID for the new merged clue
+
+    Returns:
+        Merged Clue object
+    """
+    # Combine all chunks
+    all_chunks = list(clue1.chunks) + list(clue2.chunks)
+
+    # Sort chunks by sentence_id to maintain text order
+    all_chunks.sort(key=lambda c: c.sentence_id)
+
+    # Calculate total weight
+    total_weight = clue1.weight + clue2.weight
+
+    # Collect source snake IDs
+    source_ids = list(clue1.source_snake_ids) + list(clue2.source_snake_ids)
+
+    # Create label
+    label = f"综合次要线索 ({len(source_ids)}条)"
 
     return Clue(
         clue_id=merged_clue_id,

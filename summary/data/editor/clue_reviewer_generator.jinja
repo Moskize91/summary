@@ -1,6 +1,6 @@
 You are creating a tiered verification strategy for reviewing compressed text. Your job is to analyze the chunks in this narrative clue and generate a structured checklist with different verification levels based on each chunk's retention and importance attributes.
 
-**CRITICAL: Output your entire verification strategy in the SAME LANGUAGE as the source sentences provided in the chunks.** This ensures terminology, key terms, and phrasing remain consistent with the original book text without translation loss. Detect the language from the source_sentences and use it throughout your output.
+**CRITICAL: Output your entire verification strategy in the SAME LANGUAGE as the source text provided.** This ensures terminology, key terms, and phrasing remain consistent with the original book text without translation loss. Detect the language from the source text and use it throughout your output.
 
 ---
 
@@ -8,29 +8,51 @@ You are creating a tiered verification strategy for reviewing compressed text. Y
 
 The user will provide:
 - User's reading intention
-- A narrative clue containing chunks with:
-  - Label, content (summary)
-  - Retention level (verbatim/detailed/focused/relevant, or null)
-  - Importance level (critical/important/helpful, or null)
-  - Source sentences (original text from the book)
+- A narrative clue presented as **continuous book-like text** with chunk boundaries marked using XML-style tags
+
+**XML Markup Format:**
+```xml
+Regular unmarked text...
+
+<chunk label="Chunk label" retention="detailed" importance="critical">
+Text belonging to this chunk...
+</chunk>
+
+More unmarked text...
+
+<chunk label="Another chunk" retention="focused">
+More chunk text...
+</chunk>
+```
+
+**Chunk Attributes:**
+- `label`: Semantic label (required)
+- `retention`: verbatim/detailed/focused/relevant (optional)
+- `importance`: critical/important/helpful (optional)
+
+**Reading Tips:**
+- Read the text naturally like a book
+- Unmarked text provides context (surrounding narrative)
+- Marked chunks are the focus points for verification
+- If chunks overlap (same text, different attributes), the highest-priority attributes are shown
 
 ---
 
 ## Your Task
 
-Analyze each chunk and assign it to one of four verification tiers based on its attributes:
+Analyze each marked `<chunk>` and assign it to one of four verification tiers based on its attributes:
 
 ### TIER 1: Critical Details (Highest priority - detailed verification)
 **Criteria:** retention IN [detailed, verbatim] OR (retention exists AND importance IN [critical, important])
 **Strategy:**
-- Attach full original text in `<source>` tags
+- Extract the original chunk text from the markup
 - Generate precise requirements listing key terms, core logic points
 - Example requirement: "Must mention '诛灭元朝' (eliminate Yuan dynasty) AND '利器' (weapon/tool) symbolism"
 
 ### TIER 2: Important Facts (Core meaning verification)
 **Criteria:** retention=focused OR (retention=detailed/verbatim without importance)
 **Strategy:**
-- Extract abstract core facts (no full source text)
+- Extract abstract core facts (no need to quote full text)
 - Allow semantic equivalence, paraphrasing, reordering
 - Example: "Core fact: Zhu Yuanzhang displayed outstanding abilities in the army (brave, strategic, calm)"
 
@@ -59,13 +81,13 @@ Structure your output EXACTLY as follows:
 
 ### TIER 1: Critical Details (Must preserve accurately)
 
-**[Chunk ID] 【Chunk label】 [retention: X, importance: Y]**
+**【Chunk label】 [retention: X, importance: Y]**
 
 Verification: ACCURATE (Details + key terms must be precise)
 
 Original source:
 <source>
-【Full original text from source_sentences, joined with spaces】
+【Original chunk text extracted from markup】
 </source>
 
 Requirements:
@@ -77,7 +99,7 @@ Requirements:
 
 ### TIER 2: Important Facts (Core meaning must be present)
 
-**[Chunk ID] 【Chunk label】 [retention: X]**
+**【Chunk label】 [retention: X]**
 
 Verification: SEMANTIC (Core facts must exist, wording flexible)
 
@@ -91,7 +113,7 @@ Flexibility: 【Note about acceptable variations】
 
 ### TIER 3: Narrative Logic (Logical connections must exist)
 
-**[Chunk ID] 【Chunk label】 [importance: X]**
+**【Chunk label】 [importance: X]**
 
 Verification: PRESENT (Logic necessary, mention sufficient)
 
@@ -103,7 +125,7 @@ Logical requirement:
 
 ### TIER 4: Optional Context (Nice to have)
 
-**[Chunk ID] 【Chunk label】 [retention: relevant]**
+**【Chunk label】 [retention: relevant]**
 
 Verification: OPTIONAL (Preserve if space allows)
 
@@ -133,9 +155,9 @@ Priority: Focus on TIER 1-2, then TIER 3 if critical for coherence
    - If only importance exists → TIER 3
    - If neither exists → TIER 4
 
-3. **Source text attachment:**
-   - ONLY attach for TIER 1 chunks (detailed verification needed)
-   - Do NOT attach for TIER 2-4 (saves context space)
+3. **Source text extraction:**
+   - For TIER 1: Extract original text from `<chunk>` tags and place in `<source>` tags
+   - For TIER 2-4: No need to quote full text (saves space)
 
 4. **Requirements style:**
    - TIER 1: Precise, term-focused ("Must include X", "Must preserve Y concept")
@@ -143,7 +165,7 @@ Priority: Focus on TIER 1-2, then TIER 3 if critical for coherence
    - TIER 3: Imperative, logic-focused ("→ Must explain how X happened")
    - TIER 4: Descriptive, context-focused ("Background: X was happening")
 
-5. **Only use information explicitly stated in source sentences** - do not add facts from general knowledge
+5. **Only use information explicitly stated in the source text** - do not add facts from general knowledge
 
 6. **Generate abstract core facts, not specific phrasings** (for TIER 2):
    - ✅ GOOD: "Multiple family members died in rapid succession"
@@ -152,6 +174,11 @@ Priority: Focus on TIER 1-2, then TIER 3 if critical for coherence
 7. **User intent consideration:**
    - Higher retention level = more aligned with user intent = stricter verification
    - Book-coherence chunks (importance only) = looser verification, just check logical presence
+
+8. **Context awareness:**
+   - Unmarked text between chunks provides narrative context
+   - Use surrounding text to better understand chunk meaning
+   - This complete context helps you generate more accurate verification strategies
 
 ---
 

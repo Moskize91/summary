@@ -11,6 +11,7 @@ from json_repair import repair_json
 from ..llm import LLM
 from ..topologization.api import Topologization
 from .clue import Clue, extract_clues_from_topologization
+from .markup import format_clue_as_book
 
 
 def _extract_json_from_markdown(text: str) -> str:
@@ -396,12 +397,12 @@ def _generate_clue_reviewers(
         if clue.is_merged:
             print(f"    Merged from snakes: {clue.source_snake_ids}")
 
-        # Format chunks as JSON with complete metadata
-        chunks_json = _format_chunks_as_json(clue.chunks, topologization)
+        # Format chunks as book-like text with XML markup
+        clue_text = format_clue_as_book(clue.chunks, topologization)
 
         # Generate reviewer strategy
         info_system_prompt = llm.load_system_prompt(info_prompt_path)
-        user_message = f"User's reading intention:\n{intention}\n\n---\n\nThread chunks:\n{chunks_json}"
+        user_message = f"User's reading intention:\n{intention}\n\n---\n\nClue text:\n{clue_text}"
 
         info_response = llm.request(
             system_prompt=info_system_prompt,
@@ -429,35 +430,6 @@ def _generate_clue_reviewers(
         print(f"    Clue {cr.clue_id}: {cr.weight:.3f}")
 
     return clue_reviewers
-
-
-def _format_chunks_as_json(chunks: list, topologization: Topologization) -> str:
-    """Format chunks as JSON with complete metadata.
-
-    Args:
-        chunks: List of Chunk objects
-        topologization: Topologization object
-
-    Returns:
-        JSON string with chunks metadata including retention, importance, and source sentences
-    """
-    chunks_with_metadata = []
-    for chunk in chunks:
-        # Get source sentences
-        source_sentences = [topologization.get_sentence_text(sid) for sid in chunk.sentence_ids]
-
-        chunks_with_metadata.append(
-            {
-                "chunk_id": chunk.id,
-                "label": chunk.label,
-                "content": chunk.content,
-                "retention": chunk.retention,
-                "importance": chunk.importance,
-                "source_sentences": source_sentences,
-            }
-        )
-
-    return json.dumps(chunks_with_metadata, ensure_ascii=False, indent=2)
 
 
 def _compress_iteration(
