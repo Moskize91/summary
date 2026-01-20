@@ -87,7 +87,7 @@ CRITICAL: You MUST output in this EXACT structure with "fragment_summary" FIRST,
       "type": "user_focused",
       "label": "brief topic label (5-15 chars)",
       "content": "full description of the key information",
-      "source_sentences": ["original sentence 1 from text", "original sentence 2 from text"],
+      "source_sentences": ["原文句子1（完整复制）", "原文句子2（完整复制）"],
       "retention": "focused"
     },
     {
@@ -95,7 +95,7 @@ CRITICAL: You MUST output in this EXACT structure with "fragment_summary" FIRST,
       "type": "user_focused",
       "label": "another topic label",
       "content": "another description",
-      "source_sentences": ["original sentence from text"],
+      "source_sentences": ["原文句子（完整复制）"],
       "retention": "detailed"
     }
   ],
@@ -125,7 +125,14 @@ CRITICAL: You MUST output in this EXACT structure with "fragment_summary" FIRST,
   - "type": MUST be "user_focused"
   - "label": 5-15 character summary
   - "content": Full one-sentence description
-  - "source_sentences": Array of original sentences from the text that this chunk is based on (copy exact text)
+  - "source_sentences": Array of original sentences from the text that this chunk is based on
+    - Prefer copying complete original text for accurate sentence ID mapping
+    - If a sentence is very long, you may use ellipsis format: "前面的文字...后面的文字"
+    - When using ellipsis:
+      - MUST use exactly three dots "..." (NOT "……" or other formats)
+      - Include enough prefix and suffix text to uniquely identify the sentence
+      - Only ONE ellipsis per string (no multiple "..." in one string)
+    - Example: "这是一个非常长的句子，包含了大量的细节描述...最终得出了重要的结论。"
   - "retention": One of "verbatim", "detailed", "focused", or "relevant"
 
 - "links": Array of relationships between chunks

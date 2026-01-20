@@ -361,19 +361,24 @@ class ChunkExtractor:
     ) -> list[SentenceId]:
         """Find all matching sentences using fuzzy matching.
 
+        Supports two modes:
+        1. Exact/fuzzy matching for original text
+        2. Ellipsis matching for format like "prefix...suffix"
+
         Args:
-            source_sent: Source sentence to match (may contain multiple actual sentences)
+            source_sent: Source sentence to match (may contain ellipsis or be original text)
             candidate_texts: List of candidate sentence texts
             text_to_id: Mapping from sentence text to sentence ID
 
         Returns:
-            List of matched sentence IDs (may be multiple if source contains multiple sentences)
+            List of matched sentence IDs
         """
         # Normalize using robust text normalization (handles punctuation, spaces, accents, etc.)
         source_clean = normalize_text(source_sent)
 
         matched_ids = []
 
+        # Phase 1: Try normal matching (exact + fuzzy)
         for candidate in candidate_texts:
             candidate_clean = normalize_text(candidate)
 
@@ -410,4 +415,125 @@ class ChunkExtractor:
             if similarity >= 0.8:  # 80% similarity threshold
                 matched_ids.append(text_to_id[candidate])
 
-        return matched_ids if matched_ids else []
+        # If normal matching succeeded, return results
+        if matched_ids:
+            return matched_ids
+
+        # Phase 2: Try ellipsis matching (only if Phase 1 failed and contains "...")
+        if "..." in source_sent:
+            ellipsis_matches = self._match_with_ellipsis(source_sent, candidate_texts, text_to_id)
+            if ellipsis_matches:
+                return ellipsis_matches
+
+        # Phase 3: Try splitting by sentence boundaries (。or .)
+        # Sometimes LLM merges multiple sentences together
+        split_matches = self._match_by_splitting(source_sent, candidate_texts, text_to_id)
+        if split_matches:
+            return split_matches
+
+        return []
+
+    def _match_with_ellipsis(
+        self,
+        source_sent: str,
+        candidate_texts: list[str],
+        text_to_id: dict[str, SentenceId],
+    ) -> list[SentenceId]:
+        """Match sentence using ellipsis format: "prefix...suffix".
+
+        Args:
+            source_sent: Source sentence with ellipsis (e.g., "前面...后面")
+            candidate_texts: List of candidate sentence texts
+            text_to_id: Mapping from sentence text to sentence ID
+
+        Returns:
+            List of matched sentence IDs
+        """
+        # Split by "..." and strip whitespace
+        parts = [p.strip() for p in source_sent.split("...")]
+
+        # Validate: should have exactly 2 parts (prefix and suffix)
+        if len(parts) != 2:
+            return []
+
+        prefix, suffix = parts
+
+        # Normalize prefix and suffix
+        prefix_clean = normalize_text(prefix)
+        suffix_clean = normalize_text(suffix)
+
+        # Both parts should be non-empty and reasonably long
+        if len(prefix_clean) < 5 or len(suffix_clean) < 5:
+            return []
+
+        matched_ids = []
+
+        for candidate in candidate_texts:
+            candidate_clean = normalize_text(candidate)
+
+            # Check if candidate starts with prefix and ends with suffix
+            if candidate_clean.startswith(prefix_clean) and candidate_clean.endswith(suffix_clean):
+                matched_ids.append(text_to_id[candidate])
+
+        return matched_ids
+
+    def _match_by_splitting(
+        self,
+        source_sent: str,
+        candidate_texts: list[str],
+        text_to_id: dict[str, SentenceId],
+    ) -> list[SentenceId]:
+        """Match by splitting source sentence into parts.
+
+        Sometimes LLM merges multiple sentences together. Try splitting by
+        Chinese/English period and match each part separately.
+
+        Args:
+            source_sent: Source sentence that may contain multiple sentences
+            candidate_texts: List of candidate sentence texts
+            text_to_id: Mapping from sentence text to sentence ID
+
+        Returns:
+            List of matched sentence IDs (in order)
+        """
+        import re
+
+        # Split by Chinese period (。) or English period followed by space/CJK char
+        # This regex splits on: 。 or . followed by space or CJK character
+        parts = re.split(r'[。]|(?<=\.)\s*(?=[\u4e00-\u9fff])', source_sent)
+        parts = [p.strip() for p in parts if p.strip()]
+
+        # Need at least 2 parts to consider it as merged sentences
+        if len(parts) < 2:
+            return []
+
+        matched_ids = []
+        seen_ids = set()
+
+        for part in parts:
+            part_clean = normalize_text(part)
+            if len(part_clean) < 5:  # Skip very short fragments
+                continue
+
+            # Try to match this part
+            for candidate in candidate_texts:
+                candidate_clean = normalize_text(candidate)
+
+                # Check exact match
+                if part_clean == candidate_clean:
+                    sid = text_to_id[candidate]
+                    if sid not in seen_ids:
+                        matched_ids.append(sid)
+                        seen_ids.add(sid)
+                    break
+
+                # Check if part is contained in candidate or vice versa
+                if len(part_clean) >= 10 and len(candidate_clean) >= 10:
+                    if part_clean in candidate_clean or candidate_clean in part_clean:
+                        sid = text_to_id[candidate]
+                        if sid not in seen_ids:
+                            matched_ids.append(sid)
+                            seen_ids.add(sid)
+                        break
+
+        return matched_ids
