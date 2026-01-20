@@ -308,6 +308,8 @@ def compress_text(
                     for i, issue in enumerate(all_issues_for_log, 1):
                         f.write(f"  Issue #{i}: Clue {issue['clue_id']}, Index {issue['issue_index']}\n")
                     f.write(f"{'-' * 80}\n\n")
+                    f.write(f"Score: {score:.2f}\n")
+                    f.write(f"{'-' * 80}\n\n")
 
             revision_feedback = _collect_feedback(reviews, llm)
             previous_compressed_text = compressed_text
@@ -486,11 +488,18 @@ def _compress_iteration(
     """
     # Load prompt template (no longer includes revision_feedback)
     prompt_path = Path(__file__).parent.parent / "data" / "editor" / "text_compressor.jinja"
+
+    # Calculate acceptable length range (±15% of target)
+    acceptable_min = int(target_length * 0.85)
+    acceptable_max = int(target_length * 1.15)
+
     system_prompt = llm.load_system_prompt(
         prompt_path,
         original_length=len(marked_text),
         target_length=target_length,
         compression_ratio=int(compression_ratio * 100),
+        acceptable_min=acceptable_min,
+        acceptable_max=acceptable_max,
     )
 
     # Build messages based on iteration
@@ -521,7 +530,8 @@ def _compress_iteration(
         raise RuntimeError("Compression failed: LLM returned empty response")
 
     full_response = response.strip()
-    compressed_text = _extract_compressed_text(full_response)
+    # Use the full response as compressed text - don't try to extract sections
+    compressed_text = full_response
 
     return full_response, compressed_text
 
@@ -662,7 +672,6 @@ def _collect_feedback(reviews: list[ReviewResult], llm: LLM) -> str:
                     "severity": severity,
                     "severity_value": severity_value,
                     "weight": review.weight,
-                    "type": issue.get("type", "unknown"),
                     "description": issue.get("missing_info") or issue.get("problem", "No description"),
                     "suggestion": issue.get("suggestion", ""),
                 }
@@ -680,7 +689,7 @@ def _collect_feedback(reviews: list[ReviewResult], llm: LLM) -> str:
     hidden_count = len(all_issues) - visible_count
 
     for i, issue in enumerate(all_issues[:visible_count], 1):
-        issues_lines.append(f"{i}. [{issue['severity'].upper()}] ({issue['type']})")
+        issues_lines.append(f"{i}. [{issue['severity'].upper()}]")
         issues_lines.append(f"   Problem: {issue['description']}")
         if issue["suggestion"]:
             issues_lines.append(f"   Suggestion: {issue['suggestion']}")

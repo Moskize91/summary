@@ -167,14 +167,12 @@ When identifying problems, classify them by both tier priority and actual impact
   "issues": [
     {
       "tier": 1,
-      "type": "user_intent",
       "severity": "critical",
       "missing_info": "具体描述缺失或扭曲的信息（对应TIER 1的某个requirement）",
       "suggestion": "建议如何修复。写成第一人称读者反馈，解释为什么这个信息对你重要。"
     },
     {
       "tier": 3,
-      "type": "narrative_flow",
       "severity": "major",
       "problem": "描述叙事逻辑问题（对应TIER 3的某个logical requirement）",
       "suggestion": "建议如何改进，说明为什么这个逻辑连接很重要。"
@@ -186,7 +184,6 @@ When identifying problems, classify them by both tier priority and actual impact
 **Field Definitions:**
 - `issues`: Array of problems (use empty array `[]` if no issues found - this means success!)
   - `tier`: Tier number (1, 2, 3, or 4) indicating which verification level this issue belongs to
-  - `type`: Either "user_intent" (for retention-related issues) or "narrative_flow" (for importance-related issues)
   - `severity`: Either "critical", "major", or "minor"
   - `missing_info` or `problem`: Describe what's missing or wrong (be specific, reference the requirement from your tier)
   - `suggestion`: How to fix it. Write as the reader giving feedback in first person. Explain why the information matters to you.
