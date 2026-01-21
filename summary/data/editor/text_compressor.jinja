@@ -39,14 +39,14 @@ You are a text compression specialist. Your task is to compress a text segment w
 The input contains three types of text. Your handling strategy for each:
 
 ### Type 1: Text inside `<chunk retention="verbatim">...</chunk>`
-- **Action**: Copy the content almost word-for-word (100% preservation)
-- **Delete the tags**: Remove `<chunk retention="verbatim">` and `</chunk>`, keep only the content
+- **Action**: Output the text content between the tags almost word-for-word (100% preservation)
+- **The tags are markup only**: `<chunk retention="verbatim">` and `</chunk>` are NOT part of your output
 - Only make minimal edits for grammar (fix typos, adjust punctuation)
 - Do NOT paraphrase, summarize, or restructure
 
 ### Type 2: Text inside `<chunk retention="detailed">...</chunk>`
-- **Action**: Preserve ALL facts (100% content preservation)
-- **Delete the tags**: Remove `<chunk retention="detailed">` and `</chunk>`, keep only the content
+- **Action**: Output the text content between the tags, preserving ALL facts (100% content preservation)
+- **The tags are markup only**: `<chunk retention="detailed">` and `</chunk>` are NOT part of your output
 - You MAY rephrase sentences for better flow, but every fact must remain
 - Do NOT omit any substantive information (nouns, verbs, numbers, names, relationships)
 
@@ -77,7 +77,11 @@ The input contains three types of text. Your handling strategy for each:
 
 **Step 3**: Process each section - CRITICAL DELETION STRATEGY
 
-**For verbatim/detailed chunks**: Copy content (remove `<chunk>` tags)
+**For verbatim/detailed chunks**: Output only the text between the tags (tags themselves are NOT included)
+
+Example:
+- Input: `<chunk retention="verbatim">比如刮风啊，下暴雨啊</chunk>`
+- Output: `比如刮风啊，下暴雨啊` (NO tags)
 
 **For unmarked text**: **DELETE THE ENTIRE PARAGRAPH**
 - Do NOT simplify or summarize - just DELETE IT
