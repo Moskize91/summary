@@ -16,49 +16,82 @@ Extract user-focused cognitive chunks from the new text segment by **matching ag
 
 **STEP 1: For each piece of information, test EXCLUDE IF conditions FIRST**
 
-**CRITICAL KEYWORD CHECK - If chunk content contains ANY of these keywords, REJECT immediately:**
+**SEMANTIC EXCLUSION CHECK - Reject content matching these patterns (language-agnostic):**
 
 **Category 1: Internal decision/planning**
-- "决定", "决策", "选择", "打算", "计划"
+- **Semantic pattern**: Content describes the protagonist making a choice, forming a plan, or deciding on future actions WITHIN THEIR MIND, not yet expressed through observable speech or actions.
+- **Why exclude**: User wants interpersonal interactions, not the protagonist's internal deliberations.
+- **Recognition**: Look for expressions of intention formation, decision-making processes, or planning thoughts regardless of specific words used.
 
 **Category 2: Internal psychological state**
-- "心理", "想法", "内心", "思考", "情感", "感受", "认为", "觉得", "意识到", "明白", "懂得"
-- "心情", "情绪", "感觉", "感到"
+- **Semantic pattern**: Content describes the protagonist's thoughts, feelings, emotions, or mental state that are NOT directly observable by other characters.
+- **Why exclude**: User wants observable behaviors and interpersonal dynamics, not internal monologues or psychological descriptions.
+- **Recognition**: Includes mental activities (thinking, feeling, realizing, understanding), emotional states (happiness, sadness, fear), or psychological concepts (mindset, attitude, inner world) that exist only in the protagonist's mind.
 
 **Category 3: Internal transformation**
-- "转变", "变化" (when describing psychological/character changes, not external circumstances)
-- "成长", "蜕变", "进步" (when describing character development)
+- **Semantic pattern**: Content describes the protagonist's character development, psychological growth, or personality changes over time.
+- **Why exclude**: User wants specific interaction moments, not narrative arcs of personal evolution.
+- **Recognition**: Distinguish from external circumstance changes - focus on internal maturation, psychological transitions, or shifts in values/beliefs.
 
 **Category 4: Narrator's voice**
-- "我们可以", "我们不得不", "作者说", "史书记载", "可以想象"
-- "这让他", "使得他", "让他意识到" (narrator interpreting character's thoughts)
+- **Semantic pattern**: Content is the narrator's or author's commentary, historical notes, or interpretative statements about the story, rather than events within the story world.
+- **Why exclude**: User wants story content, not meta-narrative commentary.
+- **Recognition**: Look for phrases indicating external perspective: "the author says", "historical records show", "we can imagine", "this made him realize" (narrator interpreting character's thoughts), or statements that couldn't be known by characters in-world.
 
-**Category 5: Generic groups (not specific to protagonist)**
-- "对百姓", "对民夫", "对农民", "对南人" (unless specifically "including Zhu Yuanzhang")
+**Category 5: Generic groups (not protagonist-specific)**
+- **Semantic pattern**: Content describes actions, attitudes, or treatments directed toward unnamed masses or generic social groups, without specifically naming or clearly including the protagonist.
+- **Why exclude**: User wants interactions specifically involving the protagonist, not general social conditions.
+- **Recognition**: Actions toward "the people", "the peasants", "civilians", "commoners", "southerners", etc. - unless the text explicitly states the protagonist is included or targeted.
 
 **EXCLUDE IF check procedure:**
-1. Read chunk content carefully
-2. Check for ANY keyword from Categories 1-5
-3. If found → REJECT, do NOT extract, move to next piece of information
-4. If NOT found → Proceed to STEP 2
+1. Read chunk content carefully and understand its semantic meaning
+2. Determine if the content matches ANY of the 5 exclusion patterns above
+3. If YES → REJECT immediately, do NOT extract, move to next piece of information
+4. If NO → Proceed to STEP 2
 
-**Examples of CORRECT rejection:**
-- "朱重八决定当和尚" → Contains "决定" (Category 1) → REJECT ❌
-- "朱重八的心理准备" → Contains "心理" (Category 2) → REJECT ❌
-- "朱重八从少年转变成战士" → Contains "转变" describing character change (Category 3) → REJECT ❌
-- "这让他意识到要造反" → Contains "让他意识到" (Category 4) → REJECT ❌
-- "元朝官吏对百姓的盘剥" → Contains "对百姓" (Category 5) → REJECT ❌
+**Pattern recognition examples:**
+
+**Category 1 example (Internal decision):**
+- Semantic: "Character formed the intention to become a monk"
+- Why reject: Describes internal decision-making process, not yet externalized
+- Category 1 match → REJECT ❌
+
+**Category 2 example (Psychological state):**
+- Semantic: "Character's mental preparation" or "Character felt anxious"
+- Why reject: Describes internal mental/emotional state invisible to others
+- Category 2 match → REJECT ❌
+
+**Category 3 example (Internal transformation):**
+- Semantic: "Character transformed from youth to warrior" (character arc)
+- Why reject: Describes psychological/character development over time, not single interaction
+- Category 3 match → REJECT ❌
+- Note: Different from "Character changed jobs" (external circumstance change) ✅
+
+**Category 4 example (Narrator's voice):**
+- Semantic: "This made him realize he should rebel" or "The author states Character was brave"
+- Why reject: Narrator interpreting character's thoughts OR author's commentary
+- Category 4 match → REJECT ❌
+
+**Category 5 example (Generic groups):**
+- Semantic: "Officials' exploitation of the peasants"
+- Why reject: Action toward generic "peasants", not specifically the protagonist
+- Category 5 match → REJECT ❌
+- Note: "Officials arrested the protagonist along with other peasants" is specific ✅
 
 **STEP 2: Check ALL conditions in IF clause**
 
 For each extraction rule in order (Rule 1, 2, 3...):
-1. **Content type** - Is this the right TYPE of content? (speech/action/expression vs internal thought)
-2. **Scene/Context** - Does the CONTEXT match the requirement?
-   - Example: Rule 1 requires "first meeting" - if text doesn't explicitly say "第一次", "初次", "first meeting", it does NOT match
-   - Example: Rule 3 requires "directed at protagonist" - if action is toward generic "百姓"/"民夫", it does NOT match
-3. **Speaker/Actor** - Is the SPEAKER the right entity?
-   - Story character ✅ vs Narrator/Author ❌
-   - Phrases like "作者说", "史书记载", "我们可以看到" = Narrator, NOT story character
+1. **Content type** - Is this the right TYPE of content?
+   - Observable behaviors (speech, actions, facial expressions) ✅
+   - vs Internal states (thoughts, feelings, decisions) ❌
+
+2. **Scene/Context** - Does the CONTEXT match the rule's requirement?
+   - If rule requires "first meeting", text must explicitly indicate this is the initial encounter
+   - If rule requires "directed at protagonist", action must specifically target the protagonist by name or clear reference
+
+3. **Speaker/Actor** - Is the SPEAKER/ACTOR the right entity?
+   - Story character (someone within the story world) ✅
+   - vs Narrator/Author (external perspective commenting on the story) ❌
 
 If ALL three conditions satisfied → Extract with specified retention level
 If ANY condition fails → Check next rule
@@ -66,57 +99,100 @@ If ANY condition fails → Check next rule
 **STEP 3: Verify extracted chunk against EXCLUDE IF again**
 
 After extracting, double-check:
-- Does chunk content contain excluded keywords?
-- Is it narrator's summary rather than character's action? (如"这让他意识到", "他开始懂得")
-- Is it general background not specific to protagonist? (如"元朝官吏对百姓", not "对朱元璋")
+- Does chunk semantic match any of the 5 exclusion patterns?
+- Is it narrator's interpretation rather than character's observable behavior?
+- Is it action toward a generic group rather than the protagonist specifically?
 
 If YES to any → DELETE the chunk
 
-**Common mistakes to avoid (with examples):**
+**STEP 4 (RELEVANT FALLBACK): Consider loosely-related content**
 
-❌ **Mistake 1**: Extracting decisions as "reactions"
-- Text: "朱重八决定当和尚"
-- Contains "决定" → EXCLUDE IF triggered → Do NOT extract
+After completing STEP 1-3 for verbatim/detailed/focused extractions, **you MAY extract additional "relevant" level chunks** with looser criteria:
 
-❌ **Mistake 2**: Extracting psychological changes
-- Text: "朱重八从少年转变成战士"
-- "转变" = internal change, not observable action → Do NOT extract
+**When to use relevant fallback:**
+- Content is RELATED to user's intent but doesn't strictly match extraction rules
+- Content provides useful context for understanding extracted chunks
+- Content shows patterns, background, or atmosphere relevant to the user's focus
+- Content is marginally protagonist-related but not strictly protagonist-specific
 
-❌ **Mistake 3**: Extracting general background as "treatment of protagonist"
-- Text: "元朝官吏对百姓的盘剥"
-- "百姓" ≠ "朱元璋" specifically → Rule 3 condition fails → Do NOT extract
+**Looser exclusion criteria for relevant:**
+- Category 1 (Internal decision): Still EXCLUDE ❌
+- Category 2 (Psychological state): Still EXCLUDE ❌
+- Category 3 (Internal transformation): Still EXCLUDE ❌
+- Category 4 (Narrator's voice): **ALLOW if it provides useful context** ✅
+- Category 5 (Generic groups): **ALLOW if it contextualizes protagonist's situation** ✅
 
-❌ **Mistake 4**: Extracting narrator's commentary as "character's opinion"
-- Text: "作者说朱重八作战勇敢"
-- Speaker = Author, not story character → Condition fails → Do NOT extract
+**Examples of valid relevant-level extractions:**
+- General social conditions that frame protagonist's experiences
+- Narrator's descriptions of environment/atmosphere where protagonist interacts
+- Background information about groups protagonist belongs to
+- Secondary characters' general behaviors that contextualize how they treat protagonist
 
-✅ **Correct extraction**:
-- Text: "郭子兴看朱元璋镇定，认为这是个吓不倒的人"
-- Content type: Character's judgment ✅
-- Scene/Context: Interpersonal interaction ✅
-- Speaker: Story character (郭子兴) ✅
-- No excluded keywords ✅
-- → Extract as "focused"
+**Quality bar for relevant:**
+- Does it help readers understand the protagonist's interpersonal situation?
+- Would removing it make the story harder to follow?
+- Is it connected to already-extracted chunks?
 
-**Aim for 3-6 chunks, but ONLY if rules match. Quality over quantity.**
+**Quantity guideline:** Aim for 1-3 relevant chunks per fragment if applicable content exists
+
+**Common mistake patterns:**
+
+❌ **Mistake type 1**: Extracting decisions as "reactions"
+- Semantic: Character deciding to take an action
+- Why wrong: Decision-making is internal process (Category 1)
+- Correct approach: Extract only the OBSERVABLE action that results from the decision, not the decision itself
+
+❌ **Mistake type 2**: Extracting psychological changes
+- Semantic: Character's personality or mindset evolving over time
+- Why wrong: Internal transformation narrative (Category 3)
+- Correct approach: Extract specific interaction moments, not growth summaries
+
+❌ **Mistake type 3**: Extracting general background as "treatment of protagonist"
+- Semantic: Actions toward unnamed social groups
+- Why wrong: Not protagonist-specific (Category 5)
+- Correct approach: Only extract if protagonist is explicitly named or clearly identified as target
+
+❌ **Mistake type 4**: Extracting narrator's commentary as "character's opinion"
+- Semantic: Author's or narrator's statements about characters
+- Why wrong: External meta-narrative voice (Category 4)
+- Correct approach: Only extract dialogue or actions by story characters, not narrator's descriptions
+
+✅ **Correct extraction pattern**:
+- Semantic: One story character observing protagonist's composure and judging them as fearless
+- Content type: Character's judgment (observable speech/thought expressed to others) ✅
+- Scene/Context: Direct interpersonal interaction ✅
+- Speaker: Story character (not narrator) ✅
+- No exclusion patterns matched ✅
+- → Extract with retention level from matched rule
+
+**Aim for 3-6 high-quality chunks (verbatim/detailed/focused), but ONLY if rules match. Quality over quantity.**
+
+**Additionally, you MAY extract 1-3 relevant-level chunks using the looser STEP 4 criteria.**
 
 **CRITICAL**: If the text segment does NOT contain information matching ANY extraction rule, output an EMPTY "chunks" array `[]`. Do NOT force extraction just because working memory exists.
 
 **Requirements:**
 1. Each chunk should be:
-   - A meaningful unit that **matches at least one extraction rule**
+   - For verbatim/detailed/focused: **matches at least one extraction rule** (STEP 2)
+   - For relevant: **passes STEP 4 looser criteria**
    - Have a concise label (5-15 characters) summarizing the topic
    - Have full content description (one sentence)
-   - Have the retention level specified by the matched rule
+   - Have the retention level specified by the matched rule OR "relevant" for STEP 4 extractions
    - Can be connected to existing working memory AND/OR other chunks from the same segment
 
 2. Do NOT repeat information already in working memory
 
-3. **Do NOT extract information that does NOT match any extraction rule, even if:**
-   - It connects to working memory
-   - It seems important for the book's plot
-   - It provides background context
-   - Such information belongs to book-coherence extraction (a different phase), NOT user-focused extraction
+3. **For verbatim/detailed/focused extractions:**
+   - Do NOT extract information that does NOT match any extraction rule, even if:
+     - It connects to working memory
+     - It seems important for the book's plot
+     - It provides background context
+   - Such information belongs to book-coherence extraction OR relevant-level extraction (STEP 4)
+
+4. **For relevant extractions (STEP 4):**
+   - Use creative judgment - over-extraction is acceptable
+   - Focus on contextual information that helps understand protagonist's interpersonal world
+   - Can include narrator descriptions and general conditions if they frame the story
 
 **Current Working Memory:**
 {{ working_memory }}
@@ -145,11 +221,14 @@ Assign each chunk a retention level based on the strategy above. The retention l
   - Example: Main themes, patterns, relationships the user cares about
 
 - **relevant**: Useful but NOT essential context (can be dropped if needed for space)
+  - **SPECIAL**: Has a separate, looser extraction path (see STEP 4)
   - Use generously for secondary context and supporting details
   - Helpful for understanding but not the user's main focus
-  - Example: Background information, supplementary examples
+  - Can include narrator descriptions and general group actions if they contextualize protagonist
+  - Example: Background information, supplementary examples, social atmosphere
+  - **Creative buffer**: Intentionally permissive - over-extraction is acceptable
 
-**Distribution guideline**: Most chunks should be "focused", fewer "detailed", and "relevant" used liberally for nice-to-have context.
+**Distribution guideline**: Most chunks should be "focused", fewer "detailed", and "relevant" used liberally for nice-to-have context. It's OK to have many relevant chunks since they can be dropped during compression.
 
 **What NOT to extract:**
 - Do NOT extract chunks matching the "Exclude" criteria in the retention strategy

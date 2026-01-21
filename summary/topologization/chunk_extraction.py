@@ -386,8 +386,8 @@ class ChunkExtractor:
             if source_clean == candidate_clean:
                 return [text_to_id[candidate]]
 
-            # Skip if either is too short
-            if len(source_clean) < 20 or len(candidate_clean) < 20:
+            # Skip if either is too short (reduced from 20 to 10 to handle shorter sentences)
+            if len(source_clean) < 10 or len(candidate_clean) < 10:
                 continue
 
             # Check substring containment (both directions)
@@ -500,7 +500,7 @@ class ChunkExtractor:
 
         # Split by Chinese period (。) or English period followed by space/CJK char
         # This regex splits on: 。 or . followed by space or CJK character
-        parts = re.split(r'[。]|(?<=\.)\s*(?=[\u4e00-\u9fff])', source_sent)
+        parts = re.split(r"[。]|(?<=\.)\s*(?=[\u4e00-\u9fff])", source_sent)
         parts = [p.strip() for p in parts if p.strip()]
 
         # Need at least 2 parts to consider it as merged sentences

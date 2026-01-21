@@ -252,8 +252,8 @@ class LLM:
                 logger.error("[[Error]]:\n%s\n", last_error)
             return None
 
-        # Save to cache
-        if self._cache_dir_path is not None and cache_key is not None:
+        # Save to cache (only cache non-empty responses)
+        if self._cache_dir_path is not None and cache_key is not None and response:
             cache_file = self._cache_dir_path / f"{cache_key}.txt"
             cache_file.write_text(response, encoding="utf-8")
 
@@ -367,8 +367,8 @@ class LLM:
                 logger.error("[[Error]]:\n%s\n", last_error)
             return None
 
-        # Save to cache
-        if self._cache_dir_path is not None and cache_key is not None:
+        # Save to cache (only cache non-empty responses)
+        if self._cache_dir_path is not None and cache_key is not None and response:
             cache_file = self._cache_dir_path / f"{cache_key}.txt"
             cache_file.write_text(response, encoding="utf-8")
 
