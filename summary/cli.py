@@ -4,58 +4,12 @@ import argparse
 import sys
 from pathlib import Path
 
-from spacy.lang.xx import MultiLanguage
-from tiktoken import Encoding, get_encoding
+from tiktoken import get_encoding
 
 from .editor import compress_text
+from .epub import read_epub_sentences, write_epub
 from .llm import LLM
 from .topologization import TopologizationConfig, topologize
-
-
-def _prepare_input(input_file: Path, encoding: Encoding, batch_size: int = 50000) -> list[list[tuple[int, str]]]:
-    """Prepare input from file by splitting into sentences and counting tokens.
-
-    Args:
-        input_file: Path to input text file
-        encoding: Tiktoken encoding for token counting
-        batch_size: Maximum characters per batch for spaCy processing
-
-    Returns:
-        List with one chapter containing (token_count, sentence_text) tuples
-    """
-    # Load spaCy multilingual model with sentencizer (works for any language)
-    nlp = MultiLanguage()
-    nlp.add_pipe("sentencizer")
-
-    # Read file and generate text batches
-    text_buffer = ""
-    sentences = []
-
-    with open(input_file, encoding="utf-8") as f:
-        for line in f:
-            text_buffer += line
-
-            # Process batch when buffer reaches batch_size
-            if len(text_buffer) >= batch_size:
-                doc = nlp(text_buffer)
-                for sent in doc.sents:
-                    sentence_text = sent.text.strip()
-                    if sentence_text:
-                        token_count = len(encoding.encode(sentence_text))
-                        sentences.append((token_count, sentence_text))
-                text_buffer = ""
-
-    # Process remaining text
-    if text_buffer:
-        doc = nlp(text_buffer)
-        for sent in doc.sents:
-            sentence_text = sent.text.strip()
-            if sentence_text:
-                token_count = len(encoding.encode(sentence_text))
-                sentences.append((token_count, sentence_text))
-
-    # Return as single chapter
-    return [sentences]
 
 
 def main(args: list[str] | None = None) -> int:
@@ -76,7 +30,13 @@ def main(args: list[str] | None = None) -> int:
     parser.add_argument(
         "input_file",
         type=Path,
-        help="Input text file to process",
+        help="Input EPUB file to process",
+    )
+
+    parser.add_argument(
+        "output_file",
+        type=Path,
+        help="Output EPUB file path",
     )
 
     # Optional arguments
@@ -109,13 +69,6 @@ def main(args: list[str] | None = None) -> int:
     )
 
     # Processing parameters
-    parser.add_argument(
-        "--max-chunks",
-        type=int,
-        default=40,
-        help="Maximum number of text chunks to process (0 for unlimited)",
-    )
-
     parser.add_argument(
         "--fragment-tokens",
         type=int,
@@ -174,9 +127,6 @@ def main(args: list[str] | None = None) -> int:
     # Setup cache directory
     cache_dir = parsed_args.cache
 
-    # Handle max_chunks = 0 (unlimited)
-    max_chunks = parsed_args.max_chunks if parsed_args.max_chunks > 0 else None
-
     # Setup data directory for templates
     data_dir = Path(__file__).parent / "data"
 
@@ -193,7 +143,6 @@ def main(args: list[str] | None = None) -> int:
         max_fragment_tokens=parsed_args.fragment_tokens,
         working_memory_capacity=parsed_args.memory_capacity,
         generation_decay_factor=parsed_args.decay_factor,
-        max_chunks=max_chunks,
         min_cluster_size=parsed_args.min_snake_size,
         snake_tokens=parsed_args.snake_tokens,
     )
@@ -204,11 +153,21 @@ def main(args: list[str] | None = None) -> int:
             "对于他人第一次见朱元璋的评价、反应、表情，必须一字不漏地原文保留。社会背景方面可以压缩和删节。"
         )
 
-        # Prepare input: read file, split sentences, count tokens
+        # Prepare input: read EPUB and extract sentences
         encoding = get_encoding("o200k_base")
-        print(f"Processing input file: {parsed_args.input_file}")
-        input_data = _prepare_input(parsed_args.input_file, encoding)
-        print(f"Prepared {len(input_data[0])} sentences")
+        print(f"Processing input EPUB: {parsed_args.input_file}")
+
+        # Read EPUB and collect chapter data
+        chapter_titles = []
+        input_data = []
+
+        for chapter_title, chapter_sentences in read_epub_sentences(parsed_args.input_file, encoding):
+            chapter_titles.append(chapter_title)
+            sentences_list = list(chapter_sentences)
+            input_data.append(sentences_list)
+            print(f"  Chapter: {chapter_title} ({len(sentences_list)} sentences)")
+
+        print(f"Total chapters: {len(input_data)}")
 
         # Run topologization
         topologization = topologize(
@@ -225,22 +184,22 @@ def main(args: list[str] | None = None) -> int:
         print("=== Compression Stage ===")
         print("=" * 60)
 
-        compressed_dir = parsed_args.workspace / "compressed"
-        compressed_dir.mkdir(parents=True, exist_ok=True)
-
         all_chapter_ids = topologization.get_all_chapter_ids()
         print(f"\nFound {len(all_chapter_ids)} chapters to compress")
 
+        # Collect compressed chapters for EPUB output
+        compressed_chapters = []
+
         for chapter_id in all_chapter_ids:
             group_ids = topologization.get_group_ids_for_chapter(chapter_id)
-            print(f"\nChapter {chapter_id}: {len(group_ids)} groups")
+            print(f"\nChapter {chapter_id}: {chapter_titles[chapter_id]}")
+            print(f"  Groups: {len(group_ids)}")
 
-            # Create chapter directory
-            chapter_dir = compressed_dir / f"chapter-{chapter_id}"
-            chapter_dir.mkdir(parents=True, exist_ok=True)
+            # Compress all groups in this chapter
+            chapter_compressed_texts = []
 
             for group_id in group_ids:
-                print(f"\nCompressing Chapter {chapter_id}, Group {group_id}...")
+                print(f"  Compressing Group {group_id}...")
 
                 # Compress this group
                 compressed_text = compress_text(
@@ -255,24 +214,36 @@ def main(args: list[str] | None = None) -> int:
                     log_dir_path=log_dir / "compression" if log_dir is not None else None,
                 )
 
-                # Save compressed text
-                output_path = chapter_dir / f"group-{group_id}.txt"
-                with open(output_path, "w", encoding="utf-8") as f:
-                    f.write(compressed_text)
+                chapter_compressed_texts.append(compressed_text)
+                print(f"    ✓ Length: {len(compressed_text)} characters")
 
-                print(f"✓ Saved to: {output_path}")
-                print(f"  Length: {len(compressed_text)} characters")
+            # Merge all groups in this chapter with double newlines
+            full_chapter_text = "\n\n".join(chapter_compressed_texts)
+            compressed_chapters.append((chapter_titles[chapter_id], [full_chapter_text]))
+
+        # Write output EPUB
+        print("\n" + "=" * 60)
+        print("=== Writing Output EPUB ===")
+        print("=" * 60)
+
+        # Extract book title from input filename (remove .epub extension)
+        book_title = parsed_args.input_file.stem + " (压缩版)"
+
+        write_epub(
+            chapters=compressed_chapters,
+            output_path=parsed_args.output_file,
+            book_title=book_title,
+            author="AI压缩",
+            language="zh",
+        )
 
         # Print summary
         print("\n" + "=" * 60)
         print("=== Pipeline Complete ===")
         print("=" * 60)
         print(f"Workspace: {parsed_args.workspace}")
-        print(f"Compressed texts saved to: {compressed_dir}")
-
-        # Count total compressed files
-        total_groups = sum(len(topologization.get_group_ids_for_chapter(cid)) for cid in all_chapter_ids)
-        print(f"Total compressed groups: {total_groups}")
+        print(f"Output EPUB: {parsed_args.output_file}")
+        print(f"Total chapters: {len(compressed_chapters)}")
 
         return 0
 

@@ -502,7 +502,6 @@ class ChunkExtractor:
         Returns:
             List of matched sentence IDs (in order)
         """
-        import re
 
         # Split by Chinese period (。) or English period followed by space/CJK char
         # This regex splits on: 。 or . followed by space or CJK character

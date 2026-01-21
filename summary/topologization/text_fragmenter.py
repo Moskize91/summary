@@ -57,7 +57,14 @@ class TextFragmenter:
         Yields:
             FragmentWithSentences objects with chapter-aware sentence IDs
         """
+        fragment_pending = False  # Track if there's a fragment waiting to be ended (across chapters)
+
         for chapter_id, chapter_sentences in enumerate(input):
+            # End previous chapter's last fragment before starting new chapter
+            if fragment_pending:
+                self.fragment_writer.end_fragment()
+                fragment_pending = False
+
             # Start new chapter
             self.fragment_writer.start_chapter(chapter_id)
 
@@ -66,7 +73,6 @@ class TextFragmenter:
             current_sentence_ids = []
             current_sentence_texts = []
             current_sentence_token_counts = []
-            fragment_pending = False  # Track if there's a fragment waiting to be ended
 
             for token_count, sentence_text in chapter_sentences:
                 sentence_text = sentence_text.strip()
@@ -114,6 +120,7 @@ class TextFragmenter:
                     sentence_texts=current_sentence_texts.copy(),
                     sentence_token_counts=current_sentence_token_counts.copy(),
                 )
+                fragment_pending = True  # Mark fragment as pending for next chapter or finalize()
 
     def finalize(self):
         """Finalize text fragmentation and flush remaining fragments."""

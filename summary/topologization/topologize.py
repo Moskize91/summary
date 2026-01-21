@@ -32,14 +32,13 @@ class TopologizationConfig:
     batch_size: int = 50000
     working_memory_capacity: int = 7
     generation_decay_factor: float = 0.5
-    max_chunks: int | None = None  # None for unlimited
 
     # Snake detection parameters
     min_cluster_size: int = 2
     snake_tokens: int = 700
 
     # Fragment grouping parameters
-    group_tokens_count: int = 10000  # Maximum tokens per fragment group
+    group_tokens_count: int = 9600  # Maximum tokens per fragment group
 
 
 def topologize(
@@ -97,7 +96,6 @@ def topologize(
         extractor,
         working_memory,
         wave_reflection,
-        config.max_chunks,
     )
 
     # Finalize fragment writing
@@ -209,7 +207,6 @@ def _extract_knowledge_graph(
     extractor: ChunkExtractor,
     working_memory: WorkingMemory,
     wave_reflection: WaveReflection,
-    max_chunks: int | None,
 ) -> tuple[nx.DiGraph, list[CognitiveChunk]]:
     """Extract knowledge graph from input with two-stage extraction.
 
@@ -219,7 +216,6 @@ def _extract_knowledge_graph(
         extractor: Chunk extractor
         working_memory: Working memory
         wave_reflection: Wave reflection
-        max_chunks: Maximum chunks to process (None for unlimited)
 
     Returns:
         Tuple of (knowledge_graph, all_chunks)
@@ -230,10 +226,6 @@ def _extract_knowledge_graph(
 
     for fragment_with_sentences in fragmenter.stream_fragments(input):
         chunk_count += 1
-
-        if max_chunks is not None and chunk_count > max_chunks:
-            print(f"Reached max chunks limit ({max_chunks}), stopping...")
-            break
 
         print(f"Processing fragment {chunk_count}...")
 
