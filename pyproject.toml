@@ -31,6 +31,7 @@ dependencies = [
     "networkx (>=3.0,<4.0)",
     "json-repair (>=0.55.0,<0.56.0)",
     "resource-segmentation (>=0.0.7,<0.0.8)",
+    "ebooklib (>=0.20,<0.21)",
 ]
 
 [project.urls]
