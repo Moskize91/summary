@@ -92,6 +92,26 @@ def _extract_thinking_text(full_response: str) -> str:
     return ""
 
 
+def _clean_chunk_tags(text: str) -> str:
+    """Remove all <chunk> XML tags from text.
+
+    AI sometimes includes <chunk retention="..."> tags in the output even though
+    they should only be used for input marking. This function removes all such tags
+    while preserving the text content inside.
+
+    Args:
+        text: Text that may contain <chunk> tags
+
+    Returns:
+        Cleaned text with all <chunk> tags removed
+    """
+    # Remove opening tags: <chunk> or <chunk retention="...">
+    text = re.sub(r'<chunk(?:\s+retention="[^"]*")?>', "", text)
+    # Remove closing tags: </chunk>
+    text = re.sub(r"</chunk>", "", text)
+    return text
+
+
 @dataclass
 class ClueReviewerInfo:
     """Information about a clue for reviewing compressed text."""
@@ -592,8 +612,12 @@ def _compress_iteration(
         raise RuntimeError("Compression failed: LLM returned empty response")
 
     full_response = response.strip()
-    # Use the full response as compressed text - don't try to extract sections
-    compressed_text = full_response
+
+    # Extract compressed text section from full response
+    compressed_text = _extract_compressed_text(full_response)
+
+    # Clean up any <chunk> tags that AI might have included
+    compressed_text = _clean_chunk_tags(compressed_text)
 
     return full_response, compressed_text
 

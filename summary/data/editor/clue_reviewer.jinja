@@ -35,23 +35,42 @@ The user will provide compressed text in their message. Your job is to verify th
 **Reviewing iterative improvements:**
 If you previously flagged certain issues, this new version may be a revision. You MUST review systematically:
 
-**STEP 1: Check EACH previous issue individually**
-Go through your previous response issue by issue. For EACH one, verify independently:
+**CRITICAL: ALWAYS perform FULL verification of ALL requirements**
+
+Even if you returned empty issues in the previous iteration, you MUST verify ALL requirements again in each new iteration:
+
+1. **Previous issues**: Check if they are now fixed
+2. **Previously satisfied requirements**: Check if they are STILL satisfied in the new version
+
+**Why full verification is required:**
+- The compressor may have deleted previously-present content to make room for fixes
+- Content that was present in iteration N might be absent in iteration N+1
+- You must catch regressions, not just track fixes
+- An empty previous response does NOT mean "skip verification" - it means "all was good THEN, verify it's still good NOW"
+
+**STEP 1: Verify ALL requirements against current text**
+Go through EVERY requirement in your verification strategy (TIER 1, TIER 2, TIER 3, NARRATIVE COHERENCE):
+- For EACH requirement, check the CURRENT compressed text
+- Flag ANY requirement that is no longer satisfied
+- Do NOT assume "it was there before, so I don't need to check"
+
+**STEP 2: Check EACH previous issue individually (if any)**
+If you flagged issues in the previous iteration, verify for EACH one:
 - Look at the compressed text - is this SPECIFIC information NOW present?
 - If YES (this exact information is there with correct meaning) → do NOT flag it again
 - If NO (this specific information is STILL missing or incorrect) → you MUST flag it again
 
-**STEP 2: Do NOT make assumptions**
+**STEP 3: Do NOT make assumptions**
 - NEVER assume "the compressor ignored this, so it must not matter"
 - NEVER drop an issue just because other issues were fixed
 - The compressor might NOT have seen your issue (it may have been hidden due to prioritization)
 - Each issue must be verified INDEPENDENTLY against the actual text
 
-**STEP 3: Return ALL unfixed issues**
-- If even ONE of your previous issues is still not addressed → include it in your response
-- Only return empty `[]` if ALL your requirements are truly met
+**STEP 4: Return ALL issues found**
+- If even ONE requirement is not satisfied → include it in your response
+- Only return empty `[]` if ALL your requirements are truly met in the CURRENT text
 
-An empty issues list `[]` means EVERY single requirement is satisfied. Be thorough and check each one.
+An empty issues list `[]` means EVERY single requirement is satisfied in THIS iteration. Be thorough and check each one.
 
 ---
 
@@ -135,17 +154,36 @@ An empty issues list `[]` means EVERY single requirement is satisfied. Be thorou
 **Standard:**
 - Any form of mention is sufficient
 - Brief reference counts
-- Implied by context counts
+- Implied by context counts (see strict definition below)
 - Very flexible interpretation
 
+**What "Implied by context" DOES mean:**
+✅ The specific concept is referenced indirectly with clear semantic connection
+- Example: "组织需要资金支持" → implies "面临融资困境" (concept preserved)
+- Example: "主角从员工变成了老板" → implies "角色X的身份转变" (if X is established as example)
+- Example: "技术团队缺乏关键资源" → implies "技术瓶颈问题" (semantic link clear)
+
+**What "Implied by context" DOES NOT mean:**
+❌ Simply being in the same topic area or discussing related matters
+- Example: "公司发展" ≠ "公司面临的具体融资问题" (too general, concept not present)
+- Example: "角色A的失败" ≠ "角色B的困境" (different subjects entirely)
+- Example: "战役X" ≠ "社会制度Y的分析" (same time period, but completely different concepts)
+- Example: "主角战胜对手" ≠ "社会结构的必然性分析" (related setting, different analytical level)
+
+**Clear test for TIER 3:**
+Ask: "If I remove the specific name/example, is the CORE CONCEPT still present in substance?"
+- If YES (concept is there, just not the specific example name) → Acceptable
+- If NO (concept is absent, only related topics from same setting mentioned) → Flag as MINOR
+
 **Acceptable:**
-- Single word mention
-- Brief phrase
-- Indirect reference
-- Implied by surrounding context
+- Single word mention of the concept
+- Brief phrase capturing the essence
+- Indirect reference with clear semantic link
+- Paraphrasing that preserves the concept
 
 **NOT acceptable:**
-- Completely absent (no trace of the topic)
+- Completely absent (no trace of the specific concept, even if related topics are discussed)
+- Only tangentially related information (same setting/characters but different concept)
 
 ---
 
