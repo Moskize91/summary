@@ -202,6 +202,42 @@ The severity is determined by both the tier and the nature of the problem:
 
 ---
 
+## Narrative Coherence Verification (Optional)
+
+**This section only appears if the generator identified potential coherence issues.**
+
+If your verification strategy includes a "NARRATIVE COHERENCE" section, apply these checks:
+
+**Purpose**: Ensure the compressed text maintains logical flow between chunks, especially for importance chunks that tell a coherent story.
+
+**How to verify:**
+1. Read the compressed text as a reader (not as a fact-checker)
+2. Check each identified coherence issue from your strategy
+3. Ask: "Would a reader be confused by this transition or logical jump?"
+4. Only flag if the issue genuinely disrupts narrative flow
+
+**Issue classification:**
+- **If narrative flow is severely disrupted** (reader cannot understand why topic changed) → MAJOR (coherence)
+- **If transition is awkward but meaning is clear** (reader can figure it out with effort) → MINOR (coherence)
+- **If the bridging information is present** (even implicitly) → Satisfied ✅
+
+**Important distinctions:**
+- This is NOT about "elegant writing" - it's about preventing confusion
+- This is NOT about "too much detail" - it's about logical connections
+- Flag ONLY when readers would genuinely wonder "why is this here?" or "how did we get from A to B?"
+
+**Examples of flaggable coherence issues:**
+- After discussing divination, suddenly describes government policy without explaining relevance
+- Character makes major decision but the triggering event is missing
+- Background information appears without context for why it matters at this point
+
+**Examples of acceptable compression:**
+- Simplified transitions (原文: "而且更重要的是..." → 压缩: "此时")
+- Condensed but clear causal chains
+- Implied connections that readers can infer from context
+
+---
+
 ## Scope and Boundaries
 
 **Your responsibility is limited to THIS clue only:**
@@ -231,28 +267,29 @@ The severity is determined by both the tier and the nature of the problem:
 {
   "issues": [
     {
-      "tier": 1,
       "severity": "critical",
       "problem": "【Chunk label】完全未提及。",
       "suggestion": "我需要知道【具体描述为什么这个信息重要】。请补充【具体建议】。"
     },
     {
-      "tier": 1,
       "severity": "major",
       "problem": "关于【Chunk label】的核心事实。我需要知道【缺失的具体核心事实】。",
       "suggestion": "请补充说明【具体建议】，这能帮助我理解【为什么重要】。"
     },
     {
-      "tier": 2,
       "severity": "major",
       "problem": "关于【Chunk label】的关键要点。原文提到【列举key points】，但压缩文本中完全没有提及任何一项。",
       "suggestion": "请至少提及其中一项，例如【具体建议】。"
     },
     {
-      "tier": 3,
       "severity": "minor",
       "problem": "关于【Chunk label】的信息完全缺失。",
       "suggestion": "虽然不是必需，但如果能简要提及【具体内容】会有助于理解。"
+    },
+    {
+      "severity": "major",
+      "problem": "叙事连贯性问题：【describe the abrupt transition or logical gap】",
+      "suggestion": "【具体建议如何改进过渡或补充连接信息】"
     }
   ]
 }
@@ -260,10 +297,15 @@ The severity is determined by both the tier and the nature of the problem:
 
 **Field Definitions:**
 - `issues`: Array of problems (use empty array `[]` if no issues found - this means success!)
-  - `tier`: Tier number (1, 2, or 3) indicating which verification level this issue belongs to
-  - `severity`: Either "critical", "major", or "minor" (determined by the table above)
-  - `problem`: Describe what's missing or wrong (be specific, reference the chunk label and requirement)
+  - `severity`: Either "critical", "major", or "minor" (determined by the verification rules above)
+  - `problem`: Describe what's missing or wrong (be specific, reference the chunk label for content issues, or describe the logical gap for coherence issues)
   - `suggestion`: How to fix it. Write as the reader giving feedback in first person. Explain why the information matters to you.
+
+**Note on coherence issues:**
+- Coherence issues can have severity "major" or "minor" (never "critical")
+- In the `problem` field, start with "叙事连贯性问题：" to indicate this is a coherence issue
+- Describe the logical gap or abrupt transition clearly
+- In the `suggestion` field, explain what bridging information would help
 
 ---
 

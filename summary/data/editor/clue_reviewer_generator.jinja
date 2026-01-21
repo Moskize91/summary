@@ -190,6 +190,25 @@ Existence check:
 - 【Description of what should be present in any form】
 
 ---
+
+### NARRATIVE COHERENCE (OPTIONAL - only if this clue has importance chunks)
+
+**When to include this section:**
+- ONLY if this clue contains chunks with importance attributes (critical/important/helpful)
+- Skip this section entirely if all chunks only have retention attributes
+
+**What to check:**
+Identify potential narrative gaps or logical jumps between chunks that could confuse readers:
+
+**【Potential coherence issue description】**
+- Expected flow: 【chunk A】 → 【chunk B】 → 【chunk C】
+- Potential problem: 【describe what logical connection might be missing】
+- Severity: MAJOR or MINOR
+- Suggestion: 【what bridging information would help】
+
+(Repeat for each identified coherence issue, typically 0-2 issues per clue)
+
+---
 ```
 
 ---
@@ -229,6 +248,28 @@ Existence check:
    - This complete context helps you generate more accurate verification strategies
 
 9. **Every chunk MUST appear in exactly ONE tier** - no chunk should be skipped
+
+10. **Narrative Coherence (for importance chunks only)**:
+   - Check if this clue contains chunks with importance attributes (critical/important/helpful)
+   - If yes, analyze the logical flow between these chunks in the original text
+   - Identify potential narrative gaps:
+     - Are there large jumps between chunks that skip important context?
+     - Does the story jump from topic A to topic B without explanation?
+     - Is there missing motivation for key decisions (especially for importance=critical chunks)?
+   - Common coherence issues:
+     - **Abrupt topic change**: "After discussing X, suddenly talks about Y without transition"
+     - **Missing cause**: "Character decides to do Z, but the triggering event is not mentioned"
+     - **Background info timing**: "Background policy P appears out of context without explaining why it matters now"
+   - Only flag issues that would genuinely confuse readers
+   - Limit to 0-2 coherence issues per clue (don't over-flag)
+   - Example:
+     ```
+     **缺少"元朝抓人政策"与"朱重八决定"的因果连接**
+     - Expected flow: 师兄告发 → 算卦 → **元朝抓人政策** → 朱重八意识到危险 → 决定造反
+     - Potential problem: 压缩文本在"算卦"之后突然插入"元朝官吏抓人"，读者会困惑为什么突然讲政策背景
+     - Severity: MINOR
+     - Suggestion: 在提到元朝抓人政策时，加上"此时"或"而且"等过渡词，或说明"这意味着朱重八即使不造反也可能被抓"
+     ```
 
 ---
 
