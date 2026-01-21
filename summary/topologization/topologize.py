@@ -12,7 +12,7 @@ from .api import Topologization
 from .chunk_extraction import ChunkExtractor
 from .cognitive_chunk import CognitiveChunk
 from .fragment import FragmentWriter
-from .graph_weights import add_weights_to_graph, compute_node_weights
+from .graph_weights import add_weights_to_graph
 from .snake_detector import SnakeDetector, split_connected_components
 from .snake_graph_builder import SnakeGraphBuilder
 from .text_fragmenter import TextFragmenter
@@ -153,7 +153,7 @@ def _generate_extraction_guidance(
     print("Generating extraction guidance from intention...")
 
     # Find prompt template internally (relative to summary/data/)
-    intention_prompt_file = Path(__file__).parent.parent / "data" / "intention" / "chunk_extraction.jinja"
+    intention_prompt_file = Path(__file__).parent.parent / "data" / "topologization" / "chunk_extraction.jinja"
     system_prompt = llm.load_system_prompt(
         intention_prompt_file,
         intention=intention,
