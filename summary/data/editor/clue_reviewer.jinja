@@ -179,6 +179,62 @@ Your task is **SEMANTIC VERIFICATION**, not textual comparison. You must verify 
 
 ---
 
+## Special Rules for Literary/Metaphorical Content
+
+**CRITICAL INSTRUCTION**: Some chunks contain literary, metaphorical, or symbolic language that serves a specific narrative purpose. For these chunks, factual equivalents are NOT sufficient.
+
+**How to identify literary/metaphorical content:**
+
+Look for these markers in the verification strategy:
+- Core facts or key points that include quoted metaphorical expressions (e.g., "命运准备的终结者", "压垮帝国的稻草")
+- Language describing tone, foreshadowing, or symbolic meaning
+- Prophetic or dramatic expressions (e.g., "历史在等待", "凤凰涅槃")
+- Authorial commentary or interpretive framing
+- Chunk labels with [LITERARY] tag
+
+**Verification rule for literary content:**
+
+When a core fact or key point contains literary/metaphorical language:
+1. **DO NOT accept factual substitutions** - The literary expression itself must be preserved or have a clear literary equivalent
+2. **Verify the TONE and STYLE**, not just the underlying facts
+3. **Check for narrative function** - Does the compressed text preserve the foreshadowing, dramatic tension, or symbolic meaning?
+
+**Examples of UNACCEPTABLE substitutions for literary content:**
+
+❌ Original: "命运为王朝准备了终结者" → Compressed: "某年某人出生"
+  - Problem: Loses prophetic tone and metaphorical framing
+
+❌ Original: "成为压垮帝国的最后一根稻草" → Compressed: "引发了民众起义"
+  - Problem: Loses metaphorical judgment and symbolic meaning
+
+❌ Original: "历史在这一刻等待着他" → Compressed: "后来他成为了重要人物"
+  - Problem: Changes from foreshadowing (future-oriented) to retrospective (past-oriented)
+
+❌ Original: "如同凤凰涅槃，在烈火中重生" → Compressed: "经历了艰难困苦"
+  - Problem: Loses vivid metaphor and dramatic imagery
+
+**Examples of ACCEPTABLE literary equivalents:**
+
+✅ Original: "命运为王朝准备了终结者" → Compressed: "天意选中此人作为王朝的掘墓人"
+  - Preserves prophetic tone and metaphorical meaning
+
+✅ Original: "最后一根稻草" → Compressed: "压垮骆驼的致命一击"
+  - Preserves the judgmental/conclusive meaning through alternative metaphor
+
+**When to FLAG literary content issues:**
+
+- If a core fact includes metaphorical expressions and the compressed text only has factual statements → FLAG as MAJOR
+- If the verification strategy explicitly mentions "prophetic tone", "metaphorical language", "symbolic meaning" and these are absent → FLAG as MAJOR
+- If minor details include literary language and all are absent → This contributes to MAJOR (per TIER 1 rules: "no minor details")
+
+**Balance with compression goals:**
+
+- Literary language can be simplified, but the literary NATURE must remain
+- A shorter metaphor is acceptable (e.g., "填土人" → "送葬人")
+- Complete removal of literary framing in favor of dry facts is NOT acceptable for marked literary content
+
+---
+
 ## Issue Severity Determination
 
 The severity is determined by both the tier and the nature of the problem:

@@ -71,27 +71,80 @@ Analyze each marked `<chunk>` and assign it to one of THREE tiers based on its a
 
 **Strategy:**
 - Extract the original chunk text from the markup
+- **FIRST, detect if this chunk contains literary/metaphorical content** (see guidelines below)
 - Identify core facts (essential information that must be present)
 - Identify minor details (supporting details, at least one required)
 - Generate precise requirements
 
-**Example:**
+**Literary/Metaphorical Content Detection:**
+
+Before extracting core facts, analyze the chunk text for these characteristics:
+- **Metaphorical expressions**: 比喻性语言 (e.g., "掘墓人", "最后一根稻草", "凤凰涅槃")
+- **Prophetic/foreshadowing tone**: 预示性叙述 (e.g., "命运为...准备了", "历史在等待", "注定要...")
+- **Symbolic language**: 象征性表达 (e.g., "黑云压城", "星火燎原")
+- **Authorial commentary**: 作者评论 (e.g., "这标志着...", "这意味着...")
+- **Dramatic framing**: 戏剧性框架 (e.g., "浴火重生", "命运转折")
+
+If the chunk contains ANY of these, mark it as **[LITERARY]** and follow special extraction rules:
+
+**Special extraction rules for literary chunks:**
+
+1. **Preserve metaphorical expressions in core facts**:
+   - DON'T: "某人出生"
+   - DO: "命运为王朝准备了'终结者'" (preserve the metaphorical framing)
+
+2. **Capture the tone/function, not just facts**:
+   - DON'T: "某事件引发起义"
+   - DO: "某事件成为'压垮帝国的最后一根稻草'" (preserve judgmental/conclusive tone)
+
+3. **Include literary language in both core facts AND minor details**:
+   - Core facts should capture essential metaphorical meanings
+   - Minor details should include vivid metaphors, dramatic descriptions
+
+4. **Add explicit instructions in core facts**:
+   - Use quotation marks around key metaphorical terms to signal they must be preserved
+   - Example: Core fact: "使用'掘墓人'或类似metaphorical language描述人物的历史角色"
+
+**Example (factual chunk):**
 ```
-**刘德拒绝帮助**
+**地主拒绝帮助**
 
 Source text:
 <source>
-朱重八的父母死后，他去找地主刘德，请求看在父亲给他当了一辈子佃户的分上，找个地方埋葬父亲，但刘德干净利落地拒绝了他。
+主角的父母死后，他去找地主，请求看在父亲给他当了一辈子佃户的分上，找个地方埋葬父亲，但地主干净利落地拒绝了他。
 </source>
 
 Core facts (ALL required):
-- 朱重八去找刘德求坟地
-- 刘德拒绝了他
+- 主角去找地主求坟地
+- 地主拒绝了他
 
 Minor details (at least ONE required):
-- 朱重八提到父亲当了一辈子佃户
-- 刘德的拒绝是"干净利落的"
-- 刘德说"关我何事"或"给我干活，我也给过他饭吃"
+- 主角提到父亲当了一辈子佃户
+- 地主的拒绝是"干净利落的"
+- 地主说了冷酷的话语
+```
+
+**Example (literary chunk):**
+```
+**命运的预示** [LITERARY]
+
+Source text:
+<source>
+历史为这个王朝准备了一个终结者：某人。当然他不会想到命运会交给他这样一个重要的任务。这一年，他十七岁。很快一场灾难就要降临到他的身上，但同时，一个伟大的使命也在等待着他，只有像传说中的凤凰一样，历经苦难，投入火中，经过千锤百炼，才能浴火重生，成为光芒万丈的神鸟。来吧，命运之子正在等待着你！
+</source>
+
+Core facts (ALL required):
+- 使用metaphorical/prophetic language描述主角被命运选中(如"历史准备的终结者"、"命运之子"等)
+- 这一年主角十七岁
+- Foreshadowing双重命运：一场灾难即将降临 + 一个伟大的使命在等待
+
+Minor details (at least ONE required):
+- 使用"凤凰"/"浴火重生"等metaphorical imagery描述他的转变历程
+- 提到"千锤百炼"或类似dramatic expressions
+- "光芒万丈的神鸟"或类似prophetic descriptions of future greatness
+- 直接呼告"来吧，命运之子"的dramatic address
+
+Note: This is a literary/prophetic chunk. Factual substitutions like "某年某人出生" or "他经历了很多苦难" are NOT sufficient. The prophetic tone and metaphorical framing must be preserved.
 ```
 
 ---
@@ -110,13 +163,13 @@ Minor details (at least ONE required):
 
 **Example:**
 ```
-**郭子兴审问**
+**统领审问新兵**
 
 Key points (at least ONE required):
-- 郭子兴审问朱元璋
-- 朱元璋表现镇定
-- 郭子兴想看到慌乱但没看到
-- 得知汤和介绍后相信了
+- 统领审问主角
+- 主角表现镇定
+- 统领想看到慌乱但没看到
+- 得知是熟人介绍后相信了
 ```
 
 ---
@@ -134,10 +187,10 @@ Key points (at least ONE required):
 
 **Example:**
 ```
-**朱重八的家庭**
+**主角的家庭背景**
 
 Existence check:
-- 文本中必须有关于朱重八家庭生活的任何描述（任何形式的提及都算满足）
+- 文本中必须有关于主角家庭生活的任何描述（任何形式的提及都算满足）
 ```
 
 ---
@@ -153,7 +206,7 @@ Structure your output EXACTLY as follows:
 
 ### TIER 1 (HIGH PRIORITY - CRITICAL if missing, MAJOR if incomplete)
 
-**【Chunk label】**
+**【Chunk label】** [Add [LITERARY] tag if this chunk contains metaphorical/prophetic language]
 
 Source text:
 <source>
@@ -161,13 +214,16 @@ Source text:
 </source>
 
 Core facts (ALL required):
-- 【Core fact 1】
-- 【Core fact 2】
+- 【Core fact 1 - if literary chunk, include metaphorical expressions with quotes】
+- 【Core fact 2 - preserve tone/style requirements】
 
 Minor details (at least ONE required):
-- 【Minor detail 1】
+- 【Minor detail 1 - include dramatic/metaphorical language if present】
 - 【Minor detail 2】
 - 【Minor detail 3】
+
+[If literary chunk, add a note:]
+Note: This is a literary/[metaphorical/prophetic/symbolic] chunk. Factual substitutions are NOT sufficient. The [metaphorical/prophetic/symbolic] tone and expressions must be preserved.
 
 ---
 
