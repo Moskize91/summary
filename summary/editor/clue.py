@@ -77,19 +77,47 @@ def extract_clues_from_topologization(
     # Merge smallest clues until we reach max_clues
     merged_clue_id_counter = -1
     while len(clues) > max_clues:
-        # Sort by weight ascending to find the two smallest
-        clues.sort(key=lambda c: c.weight)
+        # Sort by weight descending to determine ranking
+        clues.sort(key=lambda c: c.weight, reverse=True)
 
-        # Take the two smallest clues
-        clue1 = clues[0]
-        clue2 = clues[1]
+        # Determine candidate region: clues ranked beyond max_clues * 0.75
+        cutoff_rank = int(max_clues * 0.75)
+        candidates = clues[cutoff_rank:]  # Long-tail region
 
-        # Merge them
+        # If no candidates (shouldn't happen given loop condition), break
+        if len(candidates) < 2:
+            break
+
+        # Find the pair with maximum fragment overlap (maximum reduction)
+        best_pair = None
+        best_reduction = -1
+
+        for i in range(len(candidates)):
+            for j in range(i + 1, len(candidates)):
+                clue1 = candidates[i]
+                clue2 = candidates[j]
+
+                # Calculate fragment reduction
+                reduction = _calculate_fragment_reduction(clue1, clue2)
+
+                if reduction > best_reduction:
+                    best_reduction = reduction
+                    best_pair = (clue1, clue2)
+
+        # Merge the best pair
+        if best_pair is None:
+            # Fallback: if no valid pair found, take the two smallest by weight
+            clues.sort(key=lambda c: c.weight)
+            clue1, clue2 = clues[0], clues[1]
+        else:
+            clue1, clue2 = best_pair
+
         merged_clue = _merge_two_clues(clue1, clue2, merged_clue_id_counter)
         merged_clue_id_counter -= 1
 
         # Remove the two original clues and add the merged one
-        clues = clues[2:]  # Remove first two
+        clues.remove(clue1)
+        clues.remove(clue2)
         clues.append(merged_clue)
 
     # Re-normalize weights
@@ -102,6 +130,42 @@ def extract_clues_from_topologization(
     clues.sort(key=lambda c: c.weight, reverse=True)
 
     return clues
+
+
+def _calculate_fragment_reduction(clue1: Clue, clue2: Clue) -> int:
+    """Calculate fragment reduction when merging two clues.
+
+    Fragment reduction = (clue1 fragments + clue2 fragments) - merged fragments
+    Higher reduction means more overlap, better candidates for merging.
+
+    Args:
+        clue1: First clue
+        clue2: Second clue
+
+    Returns:
+        Number of fragments reduced (overlap count)
+    """
+    # Extract all fragment IDs from clue1's chunks
+    fragments1 = set()
+    for chunk in clue1.chunks:
+        for sentence_id in chunk.sentence_ids:
+            fragment_id = sentence_id[0]  # sentence_id is (fragment_id, sentence_index)
+            fragments1.add(fragment_id)
+
+    # Extract all fragment IDs from clue2's chunks
+    fragments2 = set()
+    for chunk in clue2.chunks:
+        for sentence_id in chunk.sentence_ids:
+            fragment_id = sentence_id[0]
+            fragments2.add(fragment_id)
+
+    # Merged fragments (union)
+    merged_fragments = fragments1 | fragments2
+
+    # Reduction = sum of individual - merged
+    reduction = len(fragments1) + len(fragments2) - len(merged_fragments)
+
+    return reduction
 
 
 def _convert_snake_to_clue(snake: Snake, topologization: Topologization) -> Clue:

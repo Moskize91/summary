@@ -1,4 +1,4 @@
-You are creating a tiered verification strategy for reviewing compressed text. Your job is to analyze the chunks in this narrative clue and generate a structured checklist with different verification levels based on each chunk's retention and importance attributes.
+You are creating a tiered verification strategy for reviewing compressed text. Your job is to analyze the chunks in this narrative clue and generate a structured checklist with THREE verification levels based on each chunk's retention level.
 
 **CRITICAL: Output your entire verification strategy in the SAME LANGUAGE as the source text provided.** This ensures terminology, key terms, and phrasing remain consistent with the original book text without translation loss. Detect the language from the source text and use it throughout your output.
 
@@ -12,7 +12,7 @@ The user will provide a narrative clue presented as **continuous book-like text*
 ```xml
 Regular unmarked text...
 
-<chunk label="Chunk label" retention="detailed" importance="critical">
+<chunk label="Chunk label" retention="detailed">
 Text belonging to this chunk...
 </chunk>
 
@@ -25,8 +25,7 @@ More chunk text...
 
 **Chunk Attributes:**
 - `label`: Semantic label (required)
-- `retention`: verbatim/detailed/focused/relevant (optional)
-- `importance`: critical/important/helpful (optional)
+- `retention`: verbatim/detailed/focused/relevant (required)
 
 **Reading Tips:**
 - Read the text naturally like a book
@@ -36,38 +35,110 @@ More chunk text...
 
 ---
 
+## Simplified Three-Level System
+
+Both retention levels (for user-focused chunks) and importance levels (for book-coherence chunks) are mapped to a unified three-tier verification system:
+
+| retention | importance | Priority Level | Completely Missing | Mentioned but Incomplete |
+|-----------|-----------|---------------|-------------------|-------------------------|
+| verbatim | — | **high** | CRITICAL | MAJOR |
+| detailed | — | **high** | CRITICAL | MAJOR |
+| — | critical | **high** | CRITICAL | MAJOR |
+| focused | — | **medium** | MAJOR | MINOR |
+| — | important | **medium** | MAJOR | MINOR |
+| relevant | — | **low** | MINOR | MINOR |
+| — | helpful | **low** | MINOR | MINOR |
+
+**Merging rule**: When a chunk has both retention and importance attributes, use the **higher priority level** for verification.
+
+**Important principle**: Every chunk must be able to generate at least a MINOR issue. This ensures no chunk is effectively ignored during verification.
+
+**Note**: verbatim and detailed are treated identically for AI verification. Word-for-word matching is handled by code post-processing.
+
+---
+
 ## Your Task
 
-Analyze each marked `<chunk>` and assign it to one of four verification tiers based on its attributes.
+Analyze each marked `<chunk>` and assign it to one of THREE tiers based on its attributes:
 
-**Note**: The `retention` and `importance` attributes represent the consensus from upstream analysis (user intent + topological structure). Use them as the basis for TIER assignment.
+### TIER 1 (high priority): verbatim OR detailed OR critical
+**Verification Condition:** "Core + Minor"
+- Must include ALL items from the **core facts list**
+- PLUS at least ONE item from the **minor details list**
 
-### TIER 1: Critical Details (Highest priority - detailed verification)
-**Criteria:** retention IN [detailed, verbatim] OR (retention exists AND importance IN [critical, important])
+**If completely missing:** CRITICAL issue
+**If mentioned but core incomplete or no minor details:** MAJOR issue
+
 **Strategy:**
 - Extract the original chunk text from the markup
-- Generate precise requirements listing key terms, core logic points
-- Example requirement: "Must mention '诛灭元朝' (eliminate Yuan dynasty) AND '利器' (weapon/tool) symbolism"
+- Identify core facts (essential information that must be present)
+- Identify minor details (supporting details, at least one required)
+- Generate precise requirements
 
-### TIER 2: Important Facts (Core meaning verification)
-**Criteria:** retention=focused OR (retention=detailed/verbatim without importance)
+**Example:**
+```
+**刘德拒绝帮助**
+
+Source text:
+<source>
+朱重八的父母死后，他去找地主刘德，请求看在父亲给他当了一辈子佃户的分上，找个地方埋葬父亲，但刘德干净利落地拒绝了他。
+</source>
+
+Core facts (ALL required):
+- 朱重八去找刘德求坟地
+- 刘德拒绝了他
+
+Minor details (at least ONE required):
+- 朱重八提到父亲当了一辈子佃户
+- 刘德的拒绝是"干净利落的"
+- 刘德说"关我何事"或"给我干活，我也给过他饭吃"
+```
+
+---
+
+### TIER 2 (medium priority): focused OR important
+**Verification Condition:** "Any One"
+- Must mention AT LEAST ONE item from the **key points list**
+
+**If none mentioned:** MAJOR issue
+**If at least one mentioned but incomplete:** MINOR issue
+
 **Strategy:**
-- Extract abstract core facts (no need to quote full text)
+- Extract core meaning without requiring full text
+- List key points (any one sufficient)
 - Allow semantic equivalence, paraphrasing, reordering
-- Example: "Core fact: Zhu Yuanzhang displayed outstanding abilities in the army (brave, strategic, calm)"
 
-### TIER 3: Narrative Logic (Logical presence verification)
-**Criteria:** importance exists but NO retention
-**Strategy:**
-- Generate imperative checkpoints in command form
-- Focus on logical connections, not details
-- Example: "→ Must explain HOW Zhu Yuanzhang entered Guo Zixing's army (introduction/referral)"
+**Example:**
+```
+**郭子兴审问**
 
-### TIER 4: Optional Context (Nice-to-have)
-**Criteria:** retention=relevant OR no attributes at all
+Key points (at least ONE required):
+- 郭子兴审问朱元璋
+- 朱元璋表现镇定
+- 郭子兴想看到慌乱但没看到
+- 得知汤和介绍后相信了
+```
+
+---
+
+### TIER 3 (low priority): relevant OR helpful
+**Verification Condition:** "Existence"
+- Must have ANY form of mention (any phrasing, any detail counts)
+
+**If not mentioned at all:** MINOR issue
+**If mentioned in any form (even incomplete):** MINOR issue (but acceptable)
+
 **Strategy:**
-- Brief description only
-- Note: "If missing, minor impact on understanding"
+- Brief description of what should be present
+- Very flexible - any reference counts
+
+**Example:**
+```
+**朱重八的家庭**
+
+Existence check:
+- 文本中必须有关于朱重八家庭生活的任何描述（任何形式的提及都算满足）
+```
 
 ---
 
@@ -75,50 +146,51 @@ Analyze each marked `<chunk>` and assign it to one of four verification tiers ba
 
 Structure your output EXACTLY as follows:
 
+```
 ## Clue: "【Clue theme name based on actual content, 3-8 characters】"
 
 ---
 
-### TIER 1: Critical Details
+### TIER 1 (HIGH PRIORITY - CRITICAL if missing, MAJOR if incomplete)
 
 **【Chunk label】**
 
-Original source:
+Source text:
 <source>
 【Original chunk text extracted from markup】
 </source>
 
-Requirements:
-- ✓ 【Specific requirement 1, e.g., "Must mention core concept A"】
-- ✓ 【Specific requirement 2, e.g., "Must include key term B with accurate meaning"】
+Core facts (ALL required):
+- 【Core fact 1】
+- 【Core fact 2】
+
+Minor details (at least ONE required):
+- 【Minor detail 1】
+- 【Minor detail 2】
+- 【Minor detail 3】
 
 ---
 
-### TIER 2: Important Facts
+### TIER 2 (MEDIUM PRIORITY - MAJOR if missing)
 
 **【Chunk label】**
 
-Core facts:
-- 【Abstract fact 1, focus on WHAT information, not HOW it's worded】
-- 【Abstract fact 2】
+Key points (at least ONE required):
+- 【Key point 1】
+- 【Key point 2】
+- 【Key point 3】
 
 ---
 
-### TIER 3: Narrative Logic
+### TIER 3 (LOW PRIORITY - MINOR if missing)
 
 **【Chunk label】**
 
-Logical requirement:
-→ 【Imperative checkpoint, e.g., "Reader must understand X led to Y"】
-→ 【Mention requirement, e.g., "Must indicate someone introduced him to the army"】
+Existence check:
+- 【Description of what should be present in any form】
 
 ---
-
-### TIER 4: Optional Context
-
-**【Chunk label】**
-
-Context: 【Brief description of background info】
+```
 
 ---
 
@@ -127,36 +199,36 @@ Context: 【Brief description of background info】
 1. **Clue naming:** Name based on what the chunks actually discuss (clue's real content), not user's general intent
 
 2. **Tier assignment logic:**
-   - If retention AND importance both exist → Usually TIER 1
-   - If only retention exists → TIER 1 (detailed/verbatim) or TIER 2 (focused) or TIER 4 (relevant)
-   - If only importance exists → TIER 3
-   - If neither exists → TIER 4
+   - retention = verbatim OR detailed → TIER 1
+   - retention = focused → TIER 2
+   - retention = relevant → TIER 3
 
 3. **Source text extraction:**
    - For TIER 1: Extract original text from `<chunk>` tags and place in `<source>` tags
-   - For TIER 2-4: No need to quote full text (saves space)
+   - For TIER 2-3: No need to quote full text (saves space)
 
-4. **Requirements style:**
-   - TIER 1: Precise, term-focused ("Must include X", "Must preserve Y concept")
-   - TIER 2: Abstract, fact-focused ("Core meaning: X did Y")
-   - TIER 3: Imperative, logic-focused ("→ Must explain how X happened")
-   - TIER 4: Descriptive, context-focused ("Background: X was happening")
+4. **Core vs Minor distinction (TIER 1 only):**
+   - Core facts: Absolutely essential information (usually 2-4 items)
+   - Minor details: Supporting details that add richness (usually 2-5 items, only need 1)
+   - If a chunk is very simple, you can have 1-2 core facts and 1-2 minor details
 
-5. **Only use information explicitly stated in the source text** - do not add facts from general knowledge
+5. **Key points quantity (TIER 2):**
+   - List 2-5 key points
+   - Reviewer only needs to find ONE to pass
+   - More options = more flexibility for compression
 
-6. **Generate abstract core facts, not specific phrasings** (for TIER 2):
+6. **Only use information explicitly stated in the source text** - do not add facts from general knowledge
+
+7. **Generate abstract requirements, not specific phrasings** (for TIER 2):
    - ✅ GOOD: "Multiple family members died in rapid succession"
    - ❌ BAD: "On June 6th father died, June 9th brother died..." (too specific)
-
-7. **User intent consideration:**
-   - Chunk attributes (retention/importance) already encode user intent from the first stage
-   - Higher retention level = more aligned with user's reading goals
-   - Trust the attributes - don't second-guess the priority levels based on content alone
 
 8. **Context awareness:**
    - Unmarked text between chunks provides narrative context
    - Use surrounding text to better understand chunk meaning
    - This complete context helps you generate more accurate verification strategies
+
+9. **Every chunk MUST appear in exactly ONE tier** - no chunk should be skipped
 
 ---
 

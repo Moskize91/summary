@@ -171,7 +171,7 @@ def main(args: list[str] | None = None) -> int:
             intention=intention,
             llm=llm,
             compression_ratio=0.2,
-            max_iterations=5,
+            max_iterations=10,
             max_clues=6,
             log_dir_path=log_dir / "compression" if log_dir is not None else None,
         )

@@ -337,6 +337,33 @@ def compress_text(
             f.write(f"Compression ratio: {len(best_version.text) / len(original_text):.1%}\n")
             f.write(f"\n{'=' * 80}\n\n")
 
+            # Print remaining unresolved issues
+            if best_version.score > 0:
+                f.write("REMAINING UNRESOLVED ISSUES\n")
+                f.write(f"{'=' * 80}\n\n")
+
+                issue_number = 1
+                for review in best_version.reviews:
+                    for issue in review.issues:
+                        severity = issue.get("severity", "minor").upper()
+                        problem = issue.get("problem", "")
+                        suggestion = issue.get("suggestion", "")
+
+                        f.write(f"{issue_number}. [{severity}]\n")
+                        f.write(f"   Problem: {problem}\n")
+                        if suggestion:
+                            f.write(f"   Suggestion: {suggestion}\n")
+                        f.write("\n")
+                        issue_number += 1
+
+                f.write(f"{'=' * 80}\n\n")
+            else:
+                f.write("🎉 CONGRATULATIONS! 🎉\n")
+                f.write(f"{'=' * 80}\n\n")
+                f.write("All issues have been successfully resolved!\n")
+                f.write("The compressed text meets all quality requirements.\n")
+                f.write(f"\n{'=' * 80}\n\n")
+
     print("\n" + "=" * 60)
     print("=== Compression Complete ===")
     print("=" * 60)

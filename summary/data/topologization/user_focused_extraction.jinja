@@ -201,24 +201,39 @@ After completing STEP 1-3 for verbatim/detailed/focused extractions, **you MAY e
 
 ## RETENTION LEVEL GUIDELINES
 
-Assign each chunk a retention level based on the strategy above. The retention level indicates HOW the user wants this information preserved during compression:
+Assign each chunk a retention level based on the strategy above. The retention level indicates HOW the user wants this information preserved during compression.
+
+**IMPORTANT**: Retention levels are combined with importance levels (for book-coherence chunks) into a unified three-tier verification system:
+- **High priority** (verbatim / detailed / critical) → CRITICAL if completely missing, MAJOR if incomplete
+- **Medium priority** (focused / important) → MAJOR if completely missing, MINOR if incomplete
+- **Low priority** (relevant / helpful) → MINOR if completely missing, MINOR if incomplete
+
+When a chunk has both retention and importance attributes, the higher priority level is used for verification.
+
+---
 
 - **verbatim**: ENTIRE passages/sentences must be preserved word-for-word
   - ONLY use if the "Verbatim" section in the retention strategy contains actual guidance
   - If it says "(None...)" or is empty, do NOT use this level
   - Applies to FULL text passages, NOT individual words or terms
   - Example: Direct quotes, critical descriptions that user explicitly requested preserved intact
+  - **Verification priority**: High (same as detailed/critical)
+  - **Verification**: Word-for-word matching (handled by code post-processing)
 
 - **detailed**: Information must be captured COMPLETELY without loss
   - Content must be complete and accurate, but wording can be adjusted
   - Includes preserving specific terminology and precise facts
   - Use sparingly - only for content that MUST be captured in full
   - Example: Core arguments, essential steps, main mechanisms that user prioritizes
+  - **Verification priority**: High (same as verbatim/critical)
+  - **Verification**: All core facts + at least one supporting detail must be present
 
 - **focused**: User's PRIMARY interest that can be moderately summarized
   - This should be the MAJORITY of extractions
   - Content can be compressed while preserving meaning
   - Example: Main themes, patterns, relationships the user cares about
+  - **Verification priority**: Medium (same as important)
+  - **Verification**: At least one key point from the chunk must be mentioned
 
 - **relevant**: Useful but NOT essential context (can be dropped if needed for space)
   - **SPECIAL**: Has a separate, looser extraction path (see STEP 4)
@@ -227,6 +242,8 @@ Assign each chunk a retention level based on the strategy above. The retention l
   - Can include narrator descriptions and general group actions if they contextualize protagonist
   - Example: Background information, supplementary examples, social atmosphere
   - **Creative buffer**: Intentionally permissive - over-extraction is acceptable
+  - **Verification priority**: Low (same as helpful)
+  - **Verification**: Any form of mention counts as satisfying the requirement
 
 **Distribution guideline**: Most chunks should be "focused", fewer "detailed", and "relevant" used liberally for nice-to-have context. It's OK to have many relevant chunks since they can be dropped during compression.
 
