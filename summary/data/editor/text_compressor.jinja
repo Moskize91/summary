@@ -34,41 +34,49 @@ You are a text compression specialist. Your task is to compress a text segment w
 
 ---
 
-## How to Handle Different Text Types
+## How to Identify and Preserve Important Content
 
-The input contains three types of text. Your handling strategy for each:
+The input text may contain `<chunk>` markup tags as optional guides to help you identify content priority. Your task is to preserve important content and heavily compress the rest.
 
-### Type 1: Text inside `<chunk retention="verbatim">...</chunk>`
-- **Action**: Output the text content between the tags almost word-for-word (100% preservation)
-- **The tags are markup only**: `<chunk retention="verbatim">` and `</chunk>` are NOT part of your output
-- Only make minimal edits for grammar (fix typos, adjust punctuation)
+**High-priority content** (preserve almost word-for-word, 100%):
+- Identification: If the input has markup, this appears inside `<chunk retention="verbatim">...</chunk>`
+- Preservation: Output the text almost exactly, only fix grammar (typos, punctuation)
 - Do NOT paraphrase, summarize, or restructure
+- Output format: Plain text only (tags are invisible markup - do NOT include them in your output)
 
-### Type 2: Text inside `<chunk retention="detailed">...</chunk>`
-- **Action**: Output the text content between the tags, preserving ALL facts (100% content preservation)
-- **The tags are markup only**: `<chunk retention="detailed">` and `</chunk>` are NOT part of your output
-- You MAY rephrase sentences for better flow, but every fact must remain
+**Medium-priority content** (preserve all facts, 100%):
+- Identification: If the input has markup, this appears inside `<chunk retention="detailed">...</chunk>`
+- Preservation: Keep all facts, but you MAY rephrase sentences for better flow
 - Do NOT omit any substantive information (nouns, verbs, numbers, names, relationships)
+- Output format: Plain text only (tags are invisible markup - do NOT include them in your output)
 
-### Type 3: Text NOT inside any `<chunk>` tags (unmarked text)
-- **Action**: DELETE 95-97% of it - keep almost NOTHING
-- This is disposable filler that provides context between marked chunks
+**Low-priority content** (heavily compress, 3-5%):
+- Identification: Text without any markup tags (or all text if input has no tags)
+- Preservation: DELETE 95-97% - keep almost NOTHING
+- This is disposable filler that provides context between important content
 - **Delete entire paragraphs, entire sections - be merciless**
 - Keep ONLY ultra-short transitions: time/place markers (e.g., "三年后" "1344年" "此时" "不久")
 - ❌ WRONG: "一切的事情都从1328年的那个夜晚开始，农民朱五四的妻子陈氏生下了一个男婴" (too long)
 - ✅ CORRECT: Delete entirely, or keep only "1328年" if needed for context
 - Delete: ALL complete sentences, ALL background exposition, ALL philosophical commentary, ALL descriptions
 - **Default action: DELETE EVERYTHING. Only keep 1-2 word time/place markers if absolutely essential**
-- The compression ratio depends ENTIRELY on how much unmarked text you delete
+- The compression ratio depends ENTIRELY on how much low-priority content you delete
+
+**CRITICAL RULE**:
+- The `<chunk>` tags (if present) are MARKUP ONLY - think of them as highlighting on paper
+- Your output is ALWAYS plain text - no tags, no markup, no XML elements whatsoever
+- If input has no `<chunk>` tags, apply compression judgment directly to the plain text based on content importance
 
 ---
 
 ## Step-by-Step Compression Process
 
-**Step 1**: Identify all `<chunk>` sections in the input
-- Mark verbatim chunks (must preserve almost word-for-word)
-- Mark detailed chunks (must preserve all facts)
-- Mark unmarked text (DELETE 95-97% of this)
+**Step 1**: Identify content priority in the input
+- If input has `<chunk>` markup: Identify high-priority (verbatim), medium-priority (detailed), and low-priority (unmarked) sections
+- If input has no markup: Use your judgment to identify important content vs. filler based on factual density
+- Mark what must be preserved almost word-for-word (100%)
+- Mark what must preserve all facts but can be rephrased (100%)
+- Mark what should be heavily deleted (3-5% retention)
 
 **Step 2**: Calculate your compression budget
 - verbatim + detailed ≈ 100% preserved ≈ {{ original_length }} * 0.22 characters
@@ -77,13 +85,17 @@ The input contains three types of text. Your handling strategy for each:
 
 **Step 3**: Process each section - CRITICAL DELETION STRATEGY
 
-**For verbatim/detailed chunks**: Output only the text between the tags (tags themselves are NOT included)
+**For high/medium-priority content**: Output the text content directly as plain text (if there were tags, they are NOT included)
 
-Example:
+Example with markup:
 - Input: `<chunk retention="verbatim">比如刮风啊，下暴雨啊</chunk>`
 - Output: `比如刮风啊，下暴雨啊` (NO tags)
 
-**For unmarked text**: **DELETE THE ENTIRE PARAGRAPH**
+Example without markup:
+- Input: Plain text you identified as important
+- Output: Same plain text (preserved or with facts preserved)
+
+**For low-priority content**: **DELETE THE ENTIRE PARAGRAPH**
 - Do NOT simplify or summarize - just DELETE IT
 - ❌ WRONG approach:
   ```

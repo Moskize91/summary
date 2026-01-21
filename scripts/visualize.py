@@ -13,7 +13,7 @@ def main():
     # Setup paths
     project_root = Path(__file__).parent.parent
     workspace_path = project_root / "workspace"
-    output_path = project_root / "output" / "knowledge_graph"
+    output_dir = project_root / "output" / "knowledge_graph"
 
     # Check if workspace exists
     if not workspace_path.exists():
@@ -26,88 +26,124 @@ def main():
     # Load Topologization object
     topo = Topologization(workspace_path)
 
-    # Build NetworkX graph from knowledge graph
-    graph = nx.DiGraph()
+    # Get all chapters
+    chapter_ids = topo.get_all_chapter_ids()
+    print(f"\nFound {len(chapter_ids)} chapter(s): {chapter_ids}")
 
-    # Add nodes with attributes
-    for chunk in topo.knowledge_graph:
-        graph.add_node(
-            chunk.id,
-            generation=chunk.generation,
-            sentence_id=chunk.sentence_id,
-            label=chunk.label,
-            retention=chunk.retention,
-            importance=chunk.importance,
-            # Don't add content to save memory
-        )
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Add edges
-    for edge in topo.knowledge_graph.get_edges():
-        graph.add_edge(edge.from_chunk.id, edge.to_chunk.id, strength=edge.strength)
+    total_visualizations = 0
 
-    print(f"Loaded graph with {len(graph.nodes())} nodes and {len(graph.edges())} edges")
+    # Process each chapter and group
+    for chapter_id in chapter_ids:
+        group_ids = topo.get_group_ids_for_chapter(chapter_id)
+        print(f"\nChapter {chapter_id}: {len(group_ids)} group(s)")
 
-    # Collect snakes from snake graph with metadata
-    snakes = []
-    snake_metadata = []
-    for snake in topo.snake_graph:
-        snakes.append(snake.chunk_ids)
-        snake_metadata.append({
-            "snake_id": snake.snake_id,
-            "tokens": snake.tokens,
-            "weight": snake.weight,
-            "size": snake.size,
-        })
+        for group_id in group_ids:
+            print(f"\n{'=' * 60}")
+            print(f"Processing Chapter {chapter_id}, Group {group_id}")
+            print(f"{'=' * 60}")
 
-    if snakes:
-        print(f"\nFound {len(snakes)} snakes:")
-        for i, snake_chunk_ids in enumerate(snakes):
-            first_node = graph.nodes[snake_chunk_ids[0]]
-            last_node = graph.nodes[snake_chunk_ids[-1]]
-            metadata = snake_metadata[i]
-            print(
-                f"  Snake {i}: {len(snake_chunk_ids)} nodes, {metadata['tokens']} tokens - "
-                f"{first_node['label']} → {last_node['label']}"
-            )
-    else:
-        print("\nNo snakes detected (all nodes will be shown in gray)")
+            # Get snake graph for this chapter/group
+            snake_graph = topo.get_snake_graph(chapter_id, group_id)
 
-    # Prepare graph_data for visualization (convert node attributes to dict format)
-    # Note: We need to manually load content for visualization
-    graph_data = {
-        "nodes": [],
-        "edges": [{"from": u, "to": v, "strength": data.get("strength")} for u, v, data in graph.edges(data=True)],
-    }
+            # Collect snakes with metadata
+            snakes = []
+            snake_metadata = []
+            for snake in snake_graph:
+                snakes.append(snake.chunk_ids)
+                snake_metadata.append(
+                    {
+                        "snake_id": snake.snake_id,
+                        "tokens": snake.tokens,
+                        "weight": snake.weight,
+                        "size": snake.size,
+                    }
+                )
 
-    # Load content from Topologization for each node
-    for node_id, data in graph.nodes(data=True):
-        chunk = topo.get_chunk(node_id)
+            if snakes:
+                print(f"Found {len(snakes)} snake(s):")
+                for i, snake_chunk_ids in enumerate(snakes):
+                    chunk_first = topo.get_chunk(snake_chunk_ids[0])
+                    chunk_last = topo.get_chunk(snake_chunk_ids[-1])
+                    metadata = snake_metadata[i]
+                    print(
+                        f"  Snake {i}: {len(snake_chunk_ids)} nodes, {metadata['tokens']} tokens - "
+                        f"{chunk_first.label} → {chunk_last.label}"
+                    )
+            else:
+                print("No snakes detected (all nodes will be shown in gray)")
 
-        # Format retention/importance for display
-        attrs = []
-        if chunk.retention:
-            attrs.append(f"retention:{chunk.retention}")
-        if chunk.importance:
-            attrs.append(f"importance:{chunk.importance}")
-        metadata_str = ", ".join(attrs) if attrs else ""
+            # Build NetworkX graph for this group's chunks
+            graph = nx.DiGraph()
+            chunk_ids_in_group = set()
 
-        graph_data["nodes"].append(
-            {
-                "id": node_id,
-                "generation": data.get("generation", 0),
-                "sentence_id": data.get("sentence_id", (0, 0)),
-                "label": data.get("label", ""),
-                "retention": chunk.retention,
-                "importance": chunk.importance,
-                "metadata": metadata_str,  # For easy display
-                "content": chunk.content,  # AI-generated summary from database
+            # Collect all chunk IDs in this group
+            for snake in snakes:
+                chunk_ids_in_group.update(snake)
+
+            # Add nodes with attributes
+            for chunk_id in chunk_ids_in_group:
+                chunk = topo.get_chunk(chunk_id)
+                graph.add_node(
+                    chunk.id,
+                    generation=chunk.generation,
+                    sentence_id=chunk.sentence_id,
+                    label=chunk.label,
+                    retention=chunk.retention,
+                    importance=chunk.importance,
+                )
+
+            # Add edges (only edges within this group)
+            for edge in topo.knowledge_graph.get_edges():
+                if edge.from_chunk.id in chunk_ids_in_group and edge.to_chunk.id in chunk_ids_in_group:
+                    graph.add_edge(edge.from_chunk.id, edge.to_chunk.id, strength=edge.strength)
+
+            print(f"Group graph: {len(graph.nodes())} nodes, {len(graph.edges())} edges")
+
+            # Prepare graph_data for visualization
+            graph_data = {
+                "nodes": [],
+                "edges": [
+                    {"from": u, "to": v, "strength": data.get("strength")} for u, v, data in graph.edges(data=True)
+                ],
             }
-        )
 
-    # Generate visualization
-    print("\nGenerating visualization...")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    visualize_snakes(graph, snakes, output_path, graph_data, snake_metadata)
+            # Load content for each node
+            for node_id, data in graph.nodes(data=True):
+                chunk = topo.get_chunk(node_id)
+
+                # Format retention/importance for display
+                attrs = []
+                if chunk.retention:
+                    attrs.append(f"retention:{chunk.retention}")
+                if chunk.importance:
+                    attrs.append(f"importance:{chunk.importance}")
+                metadata_str = ", ".join(attrs) if attrs else ""
+
+                graph_data["nodes"].append(
+                    {
+                        "id": node_id,
+                        "generation": data.get("generation", 0),
+                        "sentence_id": data.get("sentence_id", (0, 0, 0)),
+                        "label": data.get("label", ""),
+                        "retention": chunk.retention,
+                        "importance": chunk.importance,
+                        "metadata": metadata_str,
+                        "content": chunk.content,
+                    }
+                )
+
+            # Generate visualization with chapter-group prefix
+            output_path = output_dir / f"chapter-{chapter_id}-group-{group_id}"
+            print("\nGenerating visualization...")
+            visualize_snakes(graph, snakes, output_path, graph_data, snake_metadata)
+            total_visualizations += 1
+
+    print(f"\n{'=' * 60}")
+    print(f"Generated {total_visualizations} visualization(s) in {output_dir}")
+    print(f"{'=' * 60}")
 
     # Close database connection
     topo.close()

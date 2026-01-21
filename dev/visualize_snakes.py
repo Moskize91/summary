@@ -581,8 +581,30 @@ def _generate_html_wrapper(
             }});
 
             node.addEventListener('mousemove', (e) => {{
-                tooltip.style.left = (e.clientX + 15) + 'px';
-                tooltip.style.top = (e.clientY + 15) + 'px';
+                // Smart positioning: adjust tooltip to avoid viewport edges
+                const tooltipRect = tooltip.getBoundingClientRect();
+                const viewportWidth = window.innerWidth;
+                const viewportHeight = window.innerHeight;
+
+                let left = e.clientX + 15;
+                let top = e.clientY + 15;
+
+                // Adjust horizontal position if tooltip would overflow right edge
+                if (left + tooltipRect.width > viewportWidth - 10) {{
+                    left = e.clientX - tooltipRect.width - 15;
+                }}
+
+                // Adjust vertical position if tooltip would overflow bottom edge
+                if (top + tooltipRect.height > viewportHeight - 10) {{
+                    top = e.clientY - tooltipRect.height - 15;
+                }}
+
+                // Ensure tooltip doesn't go off-screen on left/top
+                left = Math.max(10, left);
+                top = Math.max(10, top);
+
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
             }});
 
             node.addEventListener('mouseleave', () => {{
