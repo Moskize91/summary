@@ -36,6 +36,8 @@ class Clue:
 def extract_clues_from_topologization(
     topologization: Topologization,
     max_clues: int = 10,
+    chapter_id: int | None = None,
+    group_id: int | None = None,
 ) -> list[Clue]:
     """Extract clues from topologization, merging low-weight snakes.
 
@@ -50,18 +52,30 @@ def extract_clues_from_topologization(
     Args:
         topologization: Topologization object with snake graph
         max_clues: Maximum number of clues to generate (default: 10)
+        chapter_id: If provided, only extract snakes from this chapter (requires group_id)
+        group_id: If provided, only extract snakes from this group (requires chapter_id)
 
     Returns:
         List of Clue objects, sorted by weight (descending)
     """
-    # Get all snakes and convert to initial clues
-    snakes = list(topologization.snake_graph)
+    # Get snakes from specified group or all groups
+    all_snakes = []
+    if chapter_id is not None and group_id is not None:
+        # Extract snakes from specific group
+        snake_graph = topologization.get_snake_graph(chapter_id, group_id)
+        all_snakes.extend(list(snake_graph))
+    else:
+        # Extract snakes from all chapters and groups
+        for cid in topologization.get_all_chapter_ids():
+            for gid in topologization.get_group_ids_for_chapter(cid):
+                snake_graph = topologization.get_snake_graph(cid, gid)
+                all_snakes.extend(list(snake_graph))
 
-    if not snakes:
+    if not all_snakes:
         return []
 
     # Convert all snakes to individual clues
-    clues = [_convert_snake_to_clue(s, topologization) for s in snakes]
+    clues = [_convert_snake_to_clue(s, topologization) for s in all_snakes]
 
     # If already within limit, no merging needed
     if len(clues) <= max_clues:

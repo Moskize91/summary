@@ -219,29 +219,60 @@ def main(args: list[str] | None = None) -> int:
             llm=llm,
             encoding=encoding,
         )
-        # Run compression
-        compressed_text = compress_text(
-            topologization=topologization,
-            intention=intention,
-            llm=llm,
-            compression_ratio=0.2,
-            max_iterations=10,
-            max_clues=6,
-            log_dir_path=log_dir / "compression" if log_dir is not None else None,
-        )
 
-        # Save compressed text
-        output_path = parsed_args.workspace / "compressed.txt"
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(compressed_text)
+        # Run compression for each chapter and group
+        print("\n" + "=" * 60)
+        print("=== Compression Stage ===")
+        print("=" * 60)
+
+        compressed_dir = parsed_args.workspace / "compressed"
+        compressed_dir.mkdir(parents=True, exist_ok=True)
+
+        all_chapter_ids = topologization.get_all_chapter_ids()
+        print(f"\nFound {len(all_chapter_ids)} chapters to compress")
+
+        for chapter_id in all_chapter_ids:
+            group_ids = topologization.get_group_ids_for_chapter(chapter_id)
+            print(f"\nChapter {chapter_id}: {len(group_ids)} groups")
+
+            # Create chapter directory
+            chapter_dir = compressed_dir / f"chapter-{chapter_id}"
+            chapter_dir.mkdir(parents=True, exist_ok=True)
+
+            for group_id in group_ids:
+                print(f"\nCompressing Chapter {chapter_id}, Group {group_id}...")
+
+                # Compress this group
+                compressed_text = compress_text(
+                    topologization=topologization,
+                    chapter_id=chapter_id,
+                    group_id=group_id,
+                    intention=intention,
+                    llm=llm,
+                    compression_ratio=0.2,
+                    max_iterations=10,
+                    max_clues=6,
+                    log_dir_path=log_dir / "compression" if log_dir is not None else None,
+                )
+
+                # Save compressed text
+                output_path = chapter_dir / f"group-{group_id}.txt"
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(compressed_text)
+
+                print(f"✓ Saved to: {output_path}")
+                print(f"  Length: {len(compressed_text)} characters")
 
         # Print summary
         print("\n" + "=" * 60)
         print("=== Pipeline Complete ===")
         print("=" * 60)
         print(f"Workspace: {parsed_args.workspace}")
-        print(f"Compressed text saved to: {output_path}")
-        print(f"Compressed text length: {len(compressed_text)} characters")
+        print(f"Compressed texts saved to: {compressed_dir}")
+
+        # Count total compressed files
+        total_groups = sum(len(topologization.get_group_ids_for_chapter(cid)) for cid in all_chapter_ids)
+        print(f"Total compressed groups: {total_groups}")
 
         return 0
 

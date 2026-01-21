@@ -223,7 +223,7 @@ class KnowledgeGraph(Graph[Chunk, ChunkEdge]):
         self._topologization = topologization
         # Load graph structure (node IDs + edges) at construction
         self._node_ids: list[int] = []
-        self._edge_tuples: list[tuple[int, int]] = []
+        self._edge_tuples: list[tuple[int, int, str | None, float]] = []
         self._load_structure()
 
     def _load_structure(self):
@@ -301,31 +301,54 @@ class SnakeGraph(Graph[Snake, SnakeEdge]):
     """Snake graph implementation with lazy-loading.
 
     Implements the Graph protocol for snake-level graph.
+    Scoped to a specific chapter and group.
     """
 
-    def __init__(self, conn: sqlite3.Connection, topologization: "Topologization"):
-        """Initialize snake graph.
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        topologization: "Topologization",
+        chapter_id: int,
+        group_id: int,
+    ):
+        """Initialize snake graph for a specific chapter and group.
 
         Args:
             conn: SQLite database connection
             topologization: Parent Topologization instance
+            chapter_id: Chapter ID to filter snakes
+            group_id: Group ID to filter snakes
         """
         self._conn = conn
         self._topologization = topologization
+        self._chapter_id = chapter_id
+        self._group_id = group_id
         # Load graph structure at construction
         self._snake_ids: list[int] = []
         self._edge_tuples: list[tuple[int, int, float]] = []  # (from, to, weight)
         self._load_structure()
 
     def _load_structure(self):
-        """Load snake IDs and edges from database."""
-        # Load all snake IDs
-        cursor = self._conn.execute("SELECT snake_id FROM snakes ORDER BY snake_id")
+        """Load snake IDs and edges from database for this chapter/group."""
+        # Load snake IDs for this chapter and group
+        cursor = self._conn.execute(
+            "SELECT id FROM snakes WHERE chapter_id = ? AND group_id = ? ORDER BY id",
+            (self._chapter_id, self._group_id),
+        )
         self._snake_ids = [row[0] for row in cursor]
 
-        # Load all edges with weights
-        cursor = self._conn.execute("SELECT from_snake, to_snake, weight FROM snake_edges")
-        self._edge_tuples = [(row[0], row[1], row[2]) for row in cursor]
+        # Load edges between snakes in this group
+        if self._snake_ids:
+            placeholders = ",".join("?" * len(self._snake_ids))
+            cursor = self._conn.execute(
+                f"""
+                SELECT from_snake_id, to_snake_id, weight
+                FROM snake_edges
+                WHERE from_snake_id IN ({placeholders}) AND to_snake_id IN ({placeholders})
+            """,
+                self._snake_ids + self._snake_ids,
+            )
+            self._edge_tuples = [(row[0], row[1], row[2]) for row in cursor]
 
     def __iter__(self) -> Iterator[Snake]:
         """Iterate all snakes (lazy-load summaries on demand).
@@ -413,7 +436,7 @@ class Topologization:
 
         # Create graph objects (implement Graph protocol)
         self.knowledge_graph: Graph[Chunk, ChunkEdge] = KnowledgeGraph(self._conn, self)
-        self.snake_graph: Graph[Snake, SnakeEdge] = SnakeGraph(self._conn, self)
+        # Note: snake_graph is now accessed per-group via get_snake_graph(chapter_id, group_id)
 
     def get_sentence_text(self, sentence_id: SentenceId) -> str:
         """Lazy-load sentence text from fragment.json.
@@ -440,7 +463,8 @@ class Topologization:
         """
         cursor = self._conn.execute(
             (
-                "SELECT id, generation, chapter_id, fragment_id, sentence_index, label, content, retention, importance, tokens, weight"
+                "SELECT id, generation, chapter_id, fragment_id, sentence_index, label, "
+                "content, retention, importance, tokens, weight"
                 " FROM chunks WHERE id = ?"
             ),
             (chunk_id,),
@@ -466,7 +490,7 @@ class Topologization:
         """Load snake from database.
 
         Args:
-            snake_id: Snake ID
+            snake_id: Global snake ID
 
         Returns:
             Snake object
@@ -475,7 +499,10 @@ class Topologization:
             ValueError: If snake not found
         """
         cursor = self._conn.execute(
-            "SELECT snake_id, size, first_label, last_label, tokens, weight FROM snakes WHERE snake_id = ?",
+            (
+                "SELECT id, chapter_id, group_id, local_snake_id, size, first_label, last_label, tokens, weight "
+                "FROM snakes WHERE id = ?"
+            ),
             (snake_id,),
         )
         row = cursor.fetchone()
@@ -484,13 +511,51 @@ class Topologization:
 
         return Snake(
             snake_id=row[0],
-            size=row[1],
-            first_label=row[2],
-            last_label=row[3],
-            tokens=row[4],
-            weight=row[5],
+            size=row[4],
+            first_label=row[5],
+            last_label=row[6],
+            tokens=row[7],
+            weight=row[8],
             _topologization=self,
         )
+
+    def get_all_chapter_ids(self) -> list[int]:
+        """Get list of all chapter IDs.
+
+        Returns:
+            Sorted list of chapter IDs
+        """
+        cursor = self._conn.execute(
+            "SELECT DISTINCT chapter_id FROM fragment_groups ORDER BY chapter_id"
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_group_ids_for_chapter(self, chapter_id: int) -> list[int]:
+        """Get list of all group IDs for a specific chapter.
+
+        Args:
+            chapter_id: Chapter ID
+
+        Returns:
+            Sorted list of group IDs
+        """
+        cursor = self._conn.execute(
+            "SELECT DISTINCT group_id FROM fragment_groups WHERE chapter_id = ? ORDER BY group_id",
+            (chapter_id,),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_snake_graph(self, chapter_id: int, group_id: int) -> Graph[Snake, SnakeEdge]:
+        """Get snake graph for a specific chapter and group.
+
+        Args:
+            chapter_id: Chapter ID
+            group_id: Group ID
+
+        Returns:
+            Snake graph for the specified group
+        """
+        return SnakeGraph(self._conn, self, chapter_id, group_id)
 
     def close(self):
         """Close database connection."""

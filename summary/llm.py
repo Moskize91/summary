@@ -8,8 +8,10 @@ from io import StringIO
 from logging import DEBUG, FileHandler, Formatter, Logger, getLogger
 from pathlib import Path
 from time import sleep
+from typing import cast
 
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from .template import create_env
 
@@ -331,7 +333,7 @@ class LLM:
                 try:
                     completion = self.client.chat.completions.create(
                         model=self.model,
-                        messages=messages,
+                        messages=cast(list[ChatCompletionMessageParam], messages),
                         temperature=temperature,
                         top_p=top_p,
                     )

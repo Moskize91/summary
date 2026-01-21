@@ -25,8 +25,10 @@ def format_clue_as_book(
     Args:
         chunks: List of Chunk objects
         topologization: Topologization object
-        wrap_high_retention: If True, wrap only high-retention chunks (verbatim/detailed) with simplified tags (for compressor)
-        full_markup: If True, wrap ALL chunks with full XML attributes including label, retention, importance (for reviewer generator)
+        wrap_high_retention: If True, wrap only high-retention chunks (verbatim/detailed)
+            with simplified tags (for compressor)
+        full_markup: If True, wrap ALL chunks with full XML attributes including label,
+            retention, importance (for reviewer generator)
 
     Returns:
         Book-like text with <chunk> markup and fragment summaries

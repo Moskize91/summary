@@ -3,6 +3,7 @@ import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import networkx as nx
 from tiktoken import Encoding
@@ -13,6 +14,7 @@ from .api import Topologization
 from .chunk_extraction import ChunkExtractor
 from .cognitive_chunk import CognitiveChunk
 from .fragment import FragmentWriter
+from .fragment_grouping import group_fragments_by_chapter
 from .graph_weights import add_weights_to_graph
 from .snake_detector import SnakeDetector, split_connected_components
 from .snake_graph_builder import SnakeGraphBuilder
@@ -35,6 +37,9 @@ class TopologizationConfig:
     # Snake detection parameters
     min_cluster_size: int = 2
     snake_tokens: int = 700
+
+    # Fragment grouping parameters
+    group_tokens_count: int = 10000  # Maximum tokens per fragment group
 
 
 def topologize(
@@ -112,24 +117,41 @@ def topologize(
     print("\nSaving knowledge graph to database...")
     _save_knowledge_graph(conn, knowledge_graph, all_chunks)
 
-    # Step 7: Detect and analyze snakes
+    # Step 6.5: Group fragments by chapter using resource segmentation
+    print(f"\n{'=' * 60}")
+    print("=== Fragment Grouping ===")
+    print(f"{'=' * 60}")
+    print(f"Group token limit: {config.group_tokens_count}")
+
+    fragment_groups = group_fragments_by_chapter(conn, workspace_path, config.group_tokens_count)
+    print(f"\nCreated {len(fragment_groups)} fragment groups:")
+    for group in fragment_groups:
+        print(f"  Chapter {group.chapter_id}, Group {group.group_id}: {len(group.fragment_ids)} fragments")
+
+    # Save fragment groups to database
+    _save_fragment_groups(conn, fragment_groups)
+
+    # Step 7: Detect and analyze snakes within each group
     print(f"\n{'=' * 60}")
     print("=== Phase 2: Thematic Chain Detection ===")
     print(f"{'=' * 60}")
 
-    snakes, snake_graph = _analyze_snakes(knowledge_graph, config)
+    group_snakes = _analyze_snakes_by_groups(conn, knowledge_graph, fragment_groups, config)
 
-    # Step 8: Save snakes to database
+    # Step 8: Save snakes to database (per group)
     print("\nSaving snakes to database...")
-    _save_snakes(conn, snakes, snake_graph, knowledge_graph)
+    _save_snakes_by_groups(conn, group_snakes, knowledge_graph)
 
     conn.close()
+
+    # Calculate total snakes across all groups
+    total_snakes = sum(len(snakes_list) for snakes_list, _ in group_snakes.values())
 
     print(f"\n{'=' * 60}")
     print("=== Pipeline Complete ===")
     print(f"{'=' * 60}")
     print(f"Total chunks: {len(all_chunks)}")
-    print(f"Total snakes: {len(snakes)}")
+    print(f"Total snakes: {total_snakes}")
     print(f"Workspace: {workspace_path}")
 
     # Step 9: Return Topologization object
@@ -370,6 +392,214 @@ def _save_knowledge_graph(
         strength = edge_data.get("strength")
         weight = edge_data.get("weight", 0.1)
         database.insert_edge(conn, from_id, to_id, strength=strength, weight=weight)
+
+
+def _save_fragment_groups(conn: sqlite3.Connection, fragment_groups: list):
+    """Save fragment groups to database.
+
+    Args:
+        conn: Database connection
+        fragment_groups: List of GroupInfo objects
+    """
+    cursor = conn.cursor()
+
+    # Insert fragment group memberships
+    for group in fragment_groups:
+        for fragment_id in group.fragment_ids:
+            cursor.execute(
+                """
+                INSERT INTO fragment_groups (chapter_id, group_id, fragment_id)
+                VALUES (?, ?, ?)
+            """,
+                (group.chapter_id, group.group_id, fragment_id),
+            )
+
+    conn.commit()
+
+
+def _analyze_snakes_by_groups(
+    conn: sqlite3.Connection,
+    knowledge_graph: nx.DiGraph,
+    fragment_groups: list,
+    config: TopologizationConfig,
+) -> dict[tuple[int, int], tuple[list[list[int]], nx.DiGraph]]:
+    """Detect snakes within each fragment group independently.
+
+    Args:
+        conn: Database connection
+        knowledge_graph: Full knowledge graph
+        fragment_groups: List of GroupInfo objects
+        config: Pipeline configuration
+
+    Returns:
+        Dict mapping (chapter_id, group_id) to (snakes, snake_graph) tuples
+    """
+    group_snakes = {}
+
+    for group in fragment_groups:
+        print(f"\nProcessing Chapter {group.chapter_id}, Group {group.group_id}:")
+        print(f"  Fragments: {group.fragment_ids}")
+
+        # Get all chunks in this group's fragments
+        cursor = conn.cursor()
+        placeholders = ",".join("?" * len(group.fragment_ids))
+        cursor.execute(
+            f"""
+            SELECT id
+            FROM chunks
+            WHERE chapter_id = ? AND fragment_id IN ({placeholders})
+        """,
+            [group.chapter_id] + group.fragment_ids,
+        )
+        chunk_ids = [row[0] for row in cursor.fetchall()]
+
+        if not chunk_ids:
+            print("  No chunks in this group")
+            group_snakes[(group.chapter_id, group.group_id)] = ([], nx.DiGraph())
+            continue
+
+        # Create subgraph with only chunks from this group
+        group_graph = cast(nx.DiGraph, knowledge_graph.subgraph(chunk_ids).copy())
+
+        # Add external edges to group_graph metadata (but don't use them for snake detection)
+        external_edges = []
+        for chunk_id in chunk_ids:
+            for neighbor in knowledge_graph.neighbors(chunk_id):
+                if neighbor not in chunk_ids:
+                    external_edges.append((chunk_id, neighbor))
+            for predecessor in knowledge_graph.predecessors(chunk_id):
+                if predecessor not in chunk_ids:
+                    external_edges.append((predecessor, chunk_id))
+
+        print(f"  Group graph: {len(group_graph.nodes())} nodes, {len(group_graph.edges())} edges")
+        print(f"  External edges: {len(external_edges)}")
+
+        # Split into connected components within group
+        components = split_connected_components(group_graph)
+        print(f"  Found {len(components)} connected component(s)")
+
+        # Detect snakes in each component
+        detector = SnakeDetector(
+            min_cluster_size=config.min_cluster_size,
+            snake_tokens=config.snake_tokens,
+        )
+
+        all_snakes = []
+        for i, component in enumerate(components):
+            print(f"    Component {i}: {len(component.nodes())} nodes")
+            component_snakes = detector.detect_snakes(component)
+            all_snakes.extend(component_snakes)
+
+        if not all_snakes:
+            print("  No snakes detected")
+            group_snakes[(group.chapter_id, group.group_id)] = ([], nx.DiGraph())
+            continue
+
+        print(f"  Found {len(all_snakes)} snakes")
+
+        # Build snake graph for this group
+        builder = SnakeGraphBuilder()
+        snake_graph = builder.build_snake_graph(all_snakes, group_graph)
+
+        # Add external edges to snake graph (inherited from chunks)
+        for snake_id, snake in enumerate(all_snakes):
+            for chunk_id in snake:
+                for from_chunk, to_chunk in external_edges:
+                    if from_chunk == chunk_id or to_chunk == chunk_id:
+                        # This snake has external connections
+                        if "external_edges" not in snake_graph.nodes[snake_id]:
+                            snake_graph.nodes[snake_id]["external_edges"] = []
+                        snake_graph.nodes[snake_id]["external_edges"].append((from_chunk, to_chunk))
+
+        print(f"  Snake graph: {len(snake_graph.nodes())} snakes, {len(snake_graph.edges())} edges")
+
+        group_snakes[(group.chapter_id, group.group_id)] = (all_snakes, snake_graph)
+
+    return group_snakes
+
+
+def _save_snakes_by_groups(
+    conn: sqlite3.Connection,
+    group_snakes: dict[tuple[int, int], tuple[list[list[int]], nx.DiGraph]],
+    knowledge_graph: nx.DiGraph,
+):
+    """Save snakes to database with chapter and group information.
+
+    Args:
+        conn: Database connection
+        group_snakes: Dict mapping (chapter_id, group_id) to (snakes, snake_graph)
+        knowledge_graph: Knowledge graph (for node attributes)
+    """
+    cursor = conn.cursor()
+
+    # Save snakes for each group
+    for (chapter_id, group_id), (snakes, snake_graph) in group_snakes.items():
+        for local_snake_id, snake in enumerate(snakes):
+            first_node = knowledge_graph.nodes[snake[0]]
+            last_node = knowledge_graph.nodes[snake[-1]]
+
+            # Calculate total tokens and weight
+            total_tokens = sum(knowledge_graph.nodes[chunk_id].get("tokens", 0) for chunk_id in snake)
+            total_weight = sum(knowledge_graph.nodes[chunk_id].get("weight", 0.0) for chunk_id in snake)
+
+            # Insert snake
+            cursor.execute(
+                """
+                INSERT INTO snakes (chapter_id, group_id, local_snake_id, size, first_label, last_label, tokens, weight)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    chapter_id,
+                    group_id,
+                    local_snake_id,
+                    len(snake),
+                    first_node["label"],
+                    last_node["label"],
+                    total_tokens,
+                    total_weight,
+                ),
+            )
+
+            # Get the auto-generated snake_id
+            global_snake_id = cursor.lastrowid
+
+            # Save snake-chunk associations
+            for position, chunk_id in enumerate(snake):
+                cursor.execute(
+                    """
+                    INSERT INTO snake_chunks (snake_id, chunk_id, position)
+                    VALUES (?, ?, ?)
+                """,
+                    (global_snake_id, chunk_id, position),
+                )
+
+        # Save snake edges (need to map local snake IDs to global snake IDs)
+        if snake_graph:
+            # Build mapping from local_snake_id to global_snake_id
+            cursor.execute(
+                """
+                SELECT id, local_snake_id
+                FROM snakes
+                WHERE chapter_id = ? AND group_id = ?
+            """,
+                (chapter_id, group_id),
+            )
+            id_mapping = {local_id: global_id for global_id, local_id in cursor.fetchall()}
+
+            for from_local, to_local in snake_graph.edges():
+                edge_data = snake_graph.edges[from_local, to_local]
+                from_global = id_mapping[from_local]
+                to_global = id_mapping[to_local]
+
+                cursor.execute(
+                    """
+                    INSERT INTO snake_edges (from_snake_id, to_snake_id, weight)
+                    VALUES (?, ?, ?)
+                """,
+                    (from_global, to_global, edge_data.get("weight", 0.1)),
+                )
+
+    conn.commit()
 
 
 def _analyze_snakes(knowledge_graph: nx.DiGraph, config: TopologizationConfig) -> tuple[list[list[int]], nx.DiGraph]:

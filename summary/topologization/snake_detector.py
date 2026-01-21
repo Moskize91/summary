@@ -108,7 +108,7 @@ class SnakeDetector:
 
         if total_tokens <= self.snake_tokens:
             print(f"  Total tokens ({total_tokens}) ≤ snake_tokens ({self.snake_tokens})")
-            print(f"  Returning entire component as single snake")
+            print("  Returning entire component as single snake")
             snake = list(graph.nodes())
             snake.sort(key=lambda nid: graph.nodes[nid]["sentence_id"])
             return [snake]

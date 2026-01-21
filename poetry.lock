@@ -1518,6 +1518,18 @@ socks = ["PySocks (>=1.5.6,!=1.5.7)"]
 use-chardet-on-py3 = ["chardet (>=3.0.2,<6)"]
 
 [[package]]
+name = "resource-segmentation"
+version = "0.0.7"
+description = ""
+optional = false
+python-versions = "<3.14,>=3.11"
+groups = ["main"]
+files = [
+    {file = "resource_segmentation-0.0.7-py3-none-any.whl", hash = "sha256:6f7ec4083c26fb58e8f4a3204fdf239fb09df0437ed179c9f50ff512ad4e2fcf"},
+    {file = "resource_segmentation-0.0.7.tar.gz", hash = "sha256:e8385c9abe27455b8c2a5bf4a2ea9481cdc93401e1c20687ee0cb1d2da0baabb"},
+]
+
+[[package]]
 name = "ruff"
 version = "0.14.11"
 description = "An extremely fast Python linter and code formatter, written in Rust."
@@ -2212,4 +2224,4 @@ dev = ["pytest", "setuptools"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "f375756d684695c20aa3deebbb942123ab050d927b29c82983b45cdd948321ee"
+content-hash = "a798e9e57d963dafd43951ec79262aa897fd6a923c3238b6af4c03416f76e429"

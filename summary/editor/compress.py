@@ -123,6 +123,8 @@ class CompressionVersion:
 
 def compress_text(
     topologization: Topologization,
+    chapter_id: int,
+    group_id: int,
     intention: str,
     llm: LLM,
     compression_ratio: float = 0.2,
@@ -130,10 +132,12 @@ def compress_text(
     max_clues: int = 10,
     log_dir_path: Path | None = None,
 ) -> str:
-    """Compress text from topologization using iterative refinement.
+    """Compress text from a specific fragment group using iterative refinement.
 
     Args:
         topologization: Topologization object with knowledge graph and snakes
+        chapter_id: Chapter ID to compress
+        group_id: Group ID within the chapter to compress
         intention: User's reading intention
         llm: LLM instance
         compression_ratio: Target compression ratio (default: 0.2 = 20%)
@@ -146,6 +150,7 @@ def compress_text(
     """
     print("\n" + "=" * 60)
     print("=== Text Compression Pipeline ===")
+    print(f"=== Chapter {chapter_id}, Group {group_id} ===")
     print("=" * 60)
 
     # Setup logging
@@ -153,27 +158,35 @@ def compress_text(
     if log_dir_path is not None:
         log_dir_path.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        log_file = log_dir_path / f"compression {timestamp}.log"
+        log_file = log_dir_path / f"compression chapter-{chapter_id} group-{group_id} {timestamp}.log"
         with open(log_file, "w", encoding="utf-8") as f:
             f.write("=== Text Compression Log ===\n")
+            f.write(f"Chapter: {chapter_id}, Group: {group_id}\n")
             f.write(f"Started at: {timestamp}\n")
             f.write(f"Compression ratio target: {compression_ratio:.0%}\n")
             f.write(f"Max iterations: {max_iterations}\n")
             f.write("\n\n")
 
-    # Step 1: Get original text
+    # Step 1: Get original text for this group
     print("\nStep 1: Loading original text...")
-    original_text = _get_full_text(topologization)
+    original_text = _get_full_text(topologization, chapter_id, group_id)
     print(f"Original text length: {len(original_text)} characters")
 
-    # Step 2: Extract clues from topologization (with merging)
+    # Step 2: Extract clues from this group's snakes
     print("\nStep 2: Extracting clues from topologization...")
-    clues = extract_clues_from_topologization(topologization, max_clues=max_clues)
-    print(f"Extracted {len(clues)} clues (max: {max_clues}) from {len(list(topologization.snake_graph))} snakes")
+    clues = extract_clues_from_topologization(
+        topologization, max_clues=max_clues, chapter_id=chapter_id, group_id=group_id
+    )
+
+    # Count snakes in this group
+    snake_graph = topologization.get_snake_graph(chapter_id, group_id)
+    total_snakes = len(list(snake_graph))
+
+    print(f"Extracted {len(clues)} clues (max: {max_clues}) from {total_snakes} snakes")
 
     # Step 2.5: Generate marked text for compression (with high-retention chunks wrapped)
     print("\nStep 2.5: Generating marked text for compression...")
-    marked_original_text = _get_marked_full_text(topologization, clues)
+    marked_original_text = _get_marked_full_text(topologization, clues, chapter_id, group_id)
     print(f"Marked text length: {len(marked_original_text)} characters")
 
     # Step 3: Generate reviewer info for each clue
@@ -373,42 +386,56 @@ def compress_text(
     return best_version.text
 
 
-def _get_full_text(topologization: Topologization) -> str:
-    """Get full original text by reading all fragments in order.
+def _get_full_text(topologization: Topologization, chapter_id: int, group_id: int) -> str:
+    """Get full original text for a specific fragment group.
 
     Args:
         topologization: Topologization object
+        chapter_id: Chapter ID
+        group_id: Group ID within the chapter
 
     Returns:
-        Full text string
+        Full text string for this group's fragments
     """
-    fragments_dir = topologization.workspace_path / "fragments"
+    # Get fragment IDs for this group from database
+    conn = topologization._conn
+    cursor = conn.execute(
+        """
+        SELECT fragment_id FROM fragment_groups
+        WHERE chapter_id = ? AND group_id = ?
+        ORDER BY fragment_id
+        """,
+        (chapter_id, group_id),
+    )
+    fragment_ids = [row[0] for row in cursor.fetchall()]
 
-    # Get all chapter directories and sort by chapter ID
-    chapter_dirs = sorted(fragments_dir.glob("chapter-*"), key=lambda p: int(p.name.split("-")[1]))
+    if not fragment_ids:
+        return ""
+
+    # Read all fragments in this group
+    fragments_dir = topologization.workspace_path / "fragments"
+    chapter_dir = fragments_dir / f"chapter-{chapter_id}"
 
     all_sentences = []
-    for chapter_dir in chapter_dirs:
-        # Get all fragment files in this chapter and sort by fragment ID
-        fragment_files = sorted(chapter_dir.glob("fragment_*.json"), key=lambda p: int(p.stem.split("_")[1]))
+    for fragment_id in fragment_ids:
+        fragment_file = chapter_dir / f"fragment_{fragment_id}.json"
 
-        for fragment_file in fragment_files:
-            with open(fragment_file, encoding="utf-8") as f:
-                fragment_data = json.load(f)
+        with open(fragment_file, encoding="utf-8") as f:
+            fragment_data = json.load(f)
 
-            # Handle both old format (list) and new format (dict with "sentences")
-            if isinstance(fragment_data, list):
-                sentences = fragment_data
-            else:
-                sentences = fragment_data["sentences"]
+        # Handle both old format (list) and new format (dict with "sentences")
+        if isinstance(fragment_data, list):
+            sentences = fragment_data
+        else:
+            sentences = fragment_data["sentences"]
 
-            for sentence in sentences:
-                all_sentences.append(sentence["text"])
+        for sentence in sentences:
+            all_sentences.append(sentence["text"])
 
     return " ".join(all_sentences)
 
 
-def _get_marked_full_text(topologization: Topologization, clues: list[Clue]) -> str:
+def _get_marked_full_text(topologization: Topologization, clues: list[Clue], chapter_id: int, group_id: int) -> str:
     """Get full original text with high-retention chunks marked.
 
     Wraps verbatim/detailed retention chunks in <chunk retention="XXX"> tags
@@ -417,6 +444,8 @@ def _get_marked_full_text(topologization: Topologization, clues: list[Clue]) -> 
     Args:
         topologization: Topologization object
         clues: List of Clue objects with chunks
+        chapter_id: Chapter ID (not used, kept for consistency)
+        group_id: Group ID (not used, kept for consistency)
 
     Returns:
         Full text string with high-retention chunks wrapped in <chunk> tags
@@ -599,9 +628,7 @@ def _review_compression(
         )
 
         # Check if this reviewer has history
-        has_history = reviewer_histories is not None and cr.clue_id in reviewer_histories
-
-        if has_history:
+        if reviewer_histories is not None and cr.clue_id in reviewer_histories:
             prev_compressed_text, prev_response = reviewer_histories[cr.clue_id]
             # Build conversation history: system + user(prev) + assistant(prev) + user(current)
             # All user messages contain only compressed text, no intention
