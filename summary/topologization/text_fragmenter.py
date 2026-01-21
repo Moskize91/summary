@@ -1,11 +1,8 @@
 """Text fragmentation utilities for splitting large texts into manageable fragments."""
 
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
-from pathlib import Path
 
-from spacy.lang.xx import MultiLanguage
-from spacy.language import Language
 from tiktoken import Encoding
 
 from .fragment import FragmentWriter, SentenceId
@@ -22,7 +19,7 @@ class FragmentWithSentences:
 
 
 class TextFragmenter:
-    """Splits text into sentences and groups them into fragments.
+    """Splits pre-processed sentences into fragments grouped by chapters.
 
     Integrates with FragmentWriter to store sentences in workspace fragments.
     """
@@ -32,84 +29,52 @@ class TextFragmenter:
         fragment_writer: FragmentWriter,
         encoding: Encoding,
         max_fragment_tokens: int = 800,
-        batch_size: int = 50000,
     ):
         """Initialize the text fragmenter.
 
         Args:
             fragment_writer: FragmentWriter for storing sentences
-            encoding: Tiktoken encoding for token counting
+            encoding: Tiktoken encoding for token counting (not used, kept for compatibility)
             max_fragment_tokens: Maximum token count for each fragment
-            batch_size: Size of text batch to process with spacy at once
         """
         self.fragment_writer = fragment_writer
         self.encoding = encoding
         self.max_fragment_tokens = max_fragment_tokens
-        self.batch_size = batch_size
-        self._nlp = self._load_language_model()
 
-    def _load_language_model(self) -> Language:
-        """Load the spacy language model with sentencizer."""
-        nlp: Language = MultiLanguage()
-        nlp.add_pipe("sentencizer")
-        return nlp
-
-    def _generate_text_batches(self, file_path: Path) -> Generator[str, None, None]:
-        """Generate text batches from a file for streaming processing.
-
-        Args:
-            file_path: Path to the text file
-
-        Yields:
-            Text batches of approximately batch_size characters
-        """
-        text_buffer = ""
-        with open(file_path, encoding="utf-8") as f:
-            for line in f:
-                # FIXME: 这里按行读的，碰到巨长行还是会爆炸！
-                text_buffer += line
-
-                # Yield batch when buffer reaches batch_size
-                if len(text_buffer) >= self.batch_size:
-                    yield text_buffer
-                    text_buffer = ""
-
-        # Yield remaining text
-        if text_buffer:
-            yield text_buffer
-
-    def stream_fragments_from_file(self, file_path: Path) -> Generator[FragmentWithSentences, None, None]:
-        """Stream text fragments from a file using spacy's pipe() for efficient processing.
+    def stream_fragments(
+        self, input: Iterable[Iterable[tuple[int, str]]]
+    ) -> Generator[FragmentWithSentences, None, None]:
+        """Stream text fragments from pre-processed chapter structure.
 
         NOTE: Fragments are yielded with fragment_writer still open (fragment not ended yet).
         The caller should call set_summary() if needed, then the next iteration will end it.
         The last fragment must be ended by calling finalize().
 
         Args:
-            file_path: Path to the text file
+            input: Outer iterable yields chapters (enumerated to get chapter_id from 0)
+                   Inner iterable yields (token_count, sentence_text) tuples
 
         Yields:
-            FragmentWithSentences objects with text and sentence IDs
+            FragmentWithSentences objects with chapter-aware sentence IDs
         """
-        current_fragment = []
-        current_fragment_tokens = 0
-        current_sentence_ids = []
-        current_sentence_texts = []
-        current_sentence_token_counts = []
-        fragment_pending = False  # Track if there's a fragment waiting to be ended
+        for chapter_id, chapter_sentences in enumerate(input):
+            # Start new chapter
+            self.fragment_writer.start_chapter(chapter_id)
 
-        # Use spacy's pipe() for efficient batch processing
-        for doc in self._nlp.pipe(self._generate_text_batches(file_path), batch_size=10):
-            for sent in doc.sents:
-                sentence_text = sent.text.strip()
+            current_fragment = []
+            current_fragment_tokens = 0
+            current_sentence_ids = []
+            current_sentence_texts = []
+            current_sentence_token_counts = []
+            fragment_pending = False  # Track if there's a fragment waiting to be ended
+
+            for token_count, sentence_text in chapter_sentences:
+                sentence_text = sentence_text.strip()
                 if not sentence_text:
                     continue
 
-                # Calculate token count for this sentence
-                sentence_token_count = len(self.encoding.encode(sentence_text))
-
                 # Yield fragment if adding sentence would exceed limit
-                if current_fragment and current_fragment_tokens + sentence_token_count > self.max_fragment_tokens:
+                if current_fragment and current_fragment_tokens + token_count > self.max_fragment_tokens:
                     # Yield current fragment (WITHOUT ending it yet - caller can still set_summary)
                     yield FragmentWithSentences(
                         text="".join(current_fragment),
@@ -132,23 +97,23 @@ class TextFragmenter:
                         fragment_pending = False
                     self.fragment_writer.start_fragment()
 
-                # Add sentence to fragment writer with token count and get sentence ID
-                sentence_id = self.fragment_writer.add_sentence(sentence_text, sentence_token_count)
+                # Add sentence to fragment writer and get sentence ID (now 3-tuple with chapter_id)
+                sentence_id = self.fragment_writer.add_sentence(sentence_text, token_count)
 
                 current_fragment.append(sentence_text)
-                current_fragment_tokens += sentence_token_count
+                current_fragment_tokens += token_count
                 current_sentence_ids.append(sentence_id)
                 current_sentence_texts.append(sentence_text)
-                current_sentence_token_counts.append(sentence_token_count)
+                current_sentence_token_counts.append(token_count)
 
-        # Yield the last fragment if it exists (WITHOUT ending it - will be ended in finalize())
-        if current_fragment:
-            yield FragmentWithSentences(
-                text="".join(current_fragment),
-                sentence_ids=current_sentence_ids.copy(),
-                sentence_texts=current_sentence_texts.copy(),
-                sentence_token_counts=current_sentence_token_counts.copy(),
-            )
+            # Yield the last fragment of this chapter if it exists (WITHOUT ending it yet)
+            if current_fragment:
+                yield FragmentWithSentences(
+                    text="".join(current_fragment),
+                    sentence_ids=current_sentence_ids.copy(),
+                    sentence_texts=current_sentence_texts.copy(),
+                    sentence_token_counts=current_sentence_token_counts.copy(),
+                )
 
     def finalize(self):
         """Finalize text fragmentation and flush remaining fragments."""

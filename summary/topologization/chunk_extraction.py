@@ -188,7 +188,13 @@ class ChunkExtractor:
 
             for data in chunks_data:
                 # Parse source_sentences to find matching sentence IDs
-                source_sentences = data.get("source_sentences", [])
+                # Handle common AI typos: "source_sences" (missing 't'), "source_sentances", etc.
+                source_sentences = (
+                    data.get("source_sentences")
+                    or data.get("source_sences")  # Common typo: missing 't'
+                    or data.get("source_sentances")  # Common typo: wrong spelling
+                    or []
+                )
                 matched_sentence_ids = []
                 seen_ids = set()  # Track seen sentence IDs to avoid duplicates
 
@@ -209,7 +215,7 @@ class ChunkExtractor:
 
                 # If no sentences matched, use minimum sentence ID as fallback
                 if not matched_sentence_ids:
-                    fallback_id = min(chunk_sentence_ids) if chunk_sentence_ids else (0, 0)
+                    fallback_id = min(chunk_sentence_ids) if chunk_sentence_ids else (0, 0, 0)
                     matched_sentence_ids = [fallback_id]
                     print(f"[[WARNING]] Failed to match source_sentences for chunk '{data.get('label', 'unknown')}'")
                     print(f"  Source sentences: {source_sentences[:1]}...")

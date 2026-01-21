@@ -1,5 +1,6 @@
 import shutil
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,7 +39,7 @@ class TopologizationConfig:
 
 def topologize(
     intention: str,
-    input_file: Path,
+    input: Iterable[Iterable[tuple[int, str]]],
     workspace_path: Path,
     config: TopologizationConfig,
     llm: LLM,
@@ -47,10 +48,12 @@ def topologize(
     """Execute topologization pipeline and create workspace.
 
     Args:
-        input_file: Input text file to process
+        intention: User's reading intention/goal
+        input: Iterable of chapters, each chapter is an iterable of (token_count, sentence_text)
         workspace_path: Directory to store fragments + database
         config: Pipeline configuration
         llm: LLM instance for extraction and summarization
+        encoding: Token encoding
 
     Returns:
         Topologization object for accessing results
@@ -58,7 +61,6 @@ def topologize(
     print("=" * 60)
     print("=== Topologization Pipeline ===")
     print("=" * 60)
-    print(f"Input: {input_file}")
     print(f"Workspace: {workspace_path}")
     print(f"Working memory capacity: {config.working_memory_capacity}\n")
 
@@ -77,7 +79,7 @@ def topologize(
 
     # Step 3: Initialize components
     fragment_writer = FragmentWriter(workspace_path)
-    fragmenter = TextFragmenter(fragment_writer, encoding, config.max_fragment_tokens, config.batch_size)
+    fragmenter = TextFragmenter(fragment_writer, encoding, config.max_fragment_tokens)
     extractor = ChunkExtractor(llm, extraction_guidance)
     working_memory = WorkingMemory(capacity=config.working_memory_capacity)
     wave_reflection = WaveReflection(generation_decay_factor=config.generation_decay_factor)
@@ -85,7 +87,7 @@ def topologize(
     # Step 4: Extract knowledge graph
     print("\n=== Phase 1: Knowledge Graph Extraction ===")
     knowledge_graph, all_chunks = _extract_knowledge_graph(
-        input_file,
+        input,
         fragmenter,
         extractor,
         working_memory,
@@ -180,17 +182,17 @@ def _generate_extraction_guidance(
 
 
 def _extract_knowledge_graph(
-    input_file: Path,
+    input: Iterable[Iterable[tuple[int, str]]],
     fragmenter: TextFragmenter,
     extractor: ChunkExtractor,
     working_memory: WorkingMemory,
     wave_reflection: WaveReflection,
     max_chunks: int | None,
 ) -> tuple[nx.DiGraph, list[CognitiveChunk]]:
-    """Extract knowledge graph from input file with two-stage extraction.
+    """Extract knowledge graph from input with two-stage extraction.
 
     Args:
-        input_file: Input text file
+        input: Iterable of chapters, each chapter is an iterable of (token_count, sentence_text)
         fragmenter: Text fragmenter
         extractor: Chunk extractor
         working_memory: Working memory
@@ -204,7 +206,7 @@ def _extract_knowledge_graph(
     all_chunks: list[CognitiveChunk] = []
     chunk_count = 0
 
-    for fragment_with_sentences in fragmenter.stream_fragments_from_file(input_file):
+    for fragment_with_sentences in fragmenter.stream_fragments(input):
         chunk_count += 1
 
         if max_chunks is not None and chunk_count > max_chunks:

@@ -4,8 +4,6 @@ Formats clue chunks as book-like text with XML-style markup for AI consumption.
 Handles fragment loading, chunk overlap merging, and non-continuous chunk splitting.
 """
 
-import json
-
 from ..topologization.api import Topologization
 from ..topologization.fragment import FragmentReader, SentenceId
 
@@ -46,27 +44,29 @@ def format_clue_as_book(
         More unmarked text...
         ```
     """
-    # Step 1: Collect all fragments involved
-    fragment_ids = sorted(set(sid[0] for chunk in chunks for sid in chunk.sentence_ids))
+    # Step 1: Collect all (chapter_id, fragment_id) pairs involved
+    chapter_fragment_pairs = sorted(set((sid[0], sid[1]) for chunk in chunks for sid in chunk.sentence_ids))
 
-    if not fragment_ids:
+    if not chapter_fragment_pairs:
         return ""
 
-    # Step 2: Load all sentences from these fragments
-    fragments_dir = topologization.workspace_path / "fragments"
-    fragment_sentences: dict[int, list[tuple[int, str]]] = {}  # fragment_id -> [(sentence_index, text), ...]
+    # Step 2: Load all sentences from these fragments using FragmentReader
+    fragment_sentences: dict[tuple[int, int], list[tuple[int, str]]] = {}
     fragment_reader = FragmentReader(topologization.workspace_path)
 
-    for frag_id in fragment_ids:
-        fragment_path = fragments_dir / f"fragment_{frag_id}.json"
-        with open(fragment_path, encoding="utf-8") as f:
-            fragment_data = json.load(f)
-
-        # Handle both old format (list) and new format (dict with "sentences")
-        if isinstance(fragment_data, list):
-            fragment_sentences[frag_id] = [(i, s["text"]) for i, s in enumerate(fragment_data)]
-        else:
-            fragment_sentences[frag_id] = [(i, s["text"]) for i, s in enumerate(fragment_data["sentences"])]
+    for chapter_id, frag_id in chapter_fragment_pairs:
+        # Get all sentences for this fragment
+        sentences = []
+        sentence_index = 0
+        while True:
+            try:
+                sentence_text = fragment_reader.get_sentence((chapter_id, frag_id, sentence_index))
+                sentences.append((sentence_index, sentence_text))
+                sentence_index += 1
+            except (IndexError, KeyError):
+                # No more sentences in this fragment
+                break
+        fragment_sentences[(chapter_id, frag_id)] = sentences
 
     # Step 3: Build chunk coverage map - handle overlaps
     # chunk_coverage: dict mapping (fragment_id, sentence_index) -> list of Chunk objects
@@ -79,15 +79,15 @@ def format_clue_as_book(
 
     # Step 4: Render all fragments with markup, inserting summaries for skipped fragments
     result_parts = []
-    for i, frag_id in enumerate(fragment_ids):
-        # Check if there are skipped fragments before this one
+    for i, (chapter_id, frag_id) in enumerate(chapter_fragment_pairs):
+        # Check if there are skipped fragments before this one (within same chapter)
         if i > 0:
-            prev_frag_id = fragment_ids[i - 1]
-            # If there's a gap (skipped fragments), insert their summaries
-            if frag_id > prev_frag_id + 1:
+            prev_chapter_id, prev_frag_id = chapter_fragment_pairs[i - 1]
+            # Only insert summaries if in same chapter with gap
+            if chapter_id == prev_chapter_id and frag_id > prev_frag_id + 1:
                 skipped_summaries = []
                 for skipped_id in range(prev_frag_id + 1, frag_id):
-                    summary = fragment_reader.get_summary(skipped_id)
+                    summary = fragment_reader.get_summary(chapter_id, skipped_id)
                     if summary:  # Only add non-empty summaries
                         skipped_summaries.append(summary)
 
@@ -97,7 +97,12 @@ def format_clue_as_book(
 
         # Render the current fragment
         marked_text = _build_fragment_markup(
-            frag_id, fragment_sentences[frag_id], chunk_coverage, wrap_high_retention, full_markup
+            chapter_id,
+            frag_id,
+            fragment_sentences[(chapter_id, frag_id)],
+            chunk_coverage,
+            wrap_high_retention,
+            full_markup,
         )
         result_parts.append(marked_text)
 
@@ -105,6 +110,7 @@ def format_clue_as_book(
 
 
 def _build_fragment_markup(
+    chapter_id: int,
     frag_id: int,
     sentences: list[tuple[int, str]],
     chunk_coverage: dict[SentenceId, list],
@@ -114,6 +120,7 @@ def _build_fragment_markup(
     """Build marked-up text for one fragment.
 
     Args:
+        chapter_id: Chapter ID
         frag_id: Fragment ID
         sentences: List of (sentence_index, text) tuples
         chunk_coverage: Map from sentence_id to list of Chunk objects
@@ -130,7 +137,7 @@ def _build_fragment_markup(
     i = 0
     while i < len(sentences):
         sent_idx, sent_text = sentences[i]
-        sid = (frag_id, sent_idx)
+        sid = (chapter_id, frag_id, sent_idx)
 
         if sid in chunk_coverage:
             # Start of a chunk range
@@ -140,7 +147,7 @@ def _build_fragment_markup(
             # Find consecutive sentences in same chunk(s)
             j = i + 1
             while j < len(sentences):
-                next_sid = (frag_id, sentences[j][0])
+                next_sid = (chapter_id, frag_id, sentences[j][0])
                 if next_sid not in chunk_coverage:
                     break
                 # Check if same chunk coverage (check if label matches)

@@ -4,8 +4,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-# Type alias for sentence ID: (fragment_id, sentence_index)
-SentenceId = tuple[int, int]
+# Type alias for sentence ID: (chapter_id, fragment_id, sentence_index)
+SentenceId = tuple[int, int, int]
 
 
 @dataclass
@@ -20,7 +20,8 @@ class FragmentWriter:
     """Manages fragment storage during text processing.
 
     Each fragment corresponds to one LLM request and is stored as:
-    fragments/fragment_1.json, fragments/fragment_2.json, etc.
+    fragments/chapter-N/fragment-M.json where N is chapter_id and M is fragment_id.
+    Fragment IDs are scoped per-chapter (start from 0 for each chapter).
     """
 
     def __init__(self, workspace_path: Path):
@@ -31,7 +32,8 @@ class FragmentWriter:
         """
         self.workspace_path = workspace_path
         self.fragments_dir = workspace_path / "fragments"
-        self.next_fragment_id = 1  # Start from 1
+        self.current_chapter_id = 0  # Current chapter being processed
+        self.next_fragment_id = 0  # Fragment ID within current chapter
         self.current_sentences: list[Sentence] = []
         self.current_summary: str | None = None  # Summary for current fragment
         self.is_fragment_open = False
@@ -46,6 +48,25 @@ class FragmentWriter:
         self.current_sentences = []
         self.current_summary = None
         self.is_fragment_open = True
+
+    def start_chapter(self, chapter_id: int):
+        """Start processing a new chapter. Resets fragment_id to 0.
+
+        Args:
+            chapter_id: Chapter ID (usually from enumeration)
+
+        Raises:
+            RuntimeError: If a fragment is currently open
+        """
+        if self.is_fragment_open:
+            raise RuntimeError("Cannot start new chapter: current fragment not ended")
+
+        self.current_chapter_id = chapter_id
+        self.next_fragment_id = 0  # Reset fragment ID for new chapter
+
+        # Create chapter directory
+        chapter_dir = self.fragments_dir / f"chapter-{chapter_id}"
+        chapter_dir.mkdir(parents=True, exist_ok=True)
 
     def set_summary(self, summary: str):
         """Set summary for current fragment.
@@ -68,7 +89,7 @@ class FragmentWriter:
             token_count: Token count for this sentence
 
         Returns:
-            Sentence ID as (fragment_id, sentence_index) tuple
+            Sentence ID as (chapter_id, fragment_id, sentence_index) tuple
 
         Raises:
             RuntimeError: If no fragment is currently open
@@ -79,9 +100,8 @@ class FragmentWriter:
         sentence_index = len(self.current_sentences)
         self.current_sentences.append(Sentence(text=text, token_count=token_count))
 
-        # Use next_fragment_id as the current fragment ID
-        # (will be written when end_fragment is called)
-        return (self.next_fragment_id, sentence_index)
+        # Return 3-tuple with chapter_id
+        return (self.current_chapter_id, self.next_fragment_id, sentence_index)
 
     def end_fragment(self):
         """Write current fragment to disk and prepare for next fragment."""
@@ -94,8 +114,9 @@ class FragmentWriter:
             self.current_summary = None
             return
 
-        # Write fragment_N.json with sentences and summary
-        fragment_path = self.fragments_dir / f"fragment_{self.next_fragment_id}.json"
+        # Write fragment file in chapter subdirectory
+        chapter_dir = self.fragments_dir / f"chapter-{self.current_chapter_id}"
+        fragment_path = chapter_dir / f"fragment_{self.next_fragment_id}.json"
 
         # Build fragment data structure
         fragment_data = {
@@ -137,7 +158,7 @@ class FragmentReader:
         """Load sentence text from fragment file.
 
         Args:
-            sentence_id: (fragment_id, sentence_index) tuple
+            sentence_id: (chapter_id, fragment_id, sentence_index) tuple
 
         Returns:
             Sentence text
@@ -146,8 +167,9 @@ class FragmentReader:
             FileNotFoundError: If fragment file doesn't exist
             IndexError: If sentence_index is out of range
         """
-        fragment_id, sentence_index = sentence_id
-        fragment_path = self.fragments_dir / f"fragment_{fragment_id}.json"
+        chapter_id, fragment_id, sentence_index = sentence_id
+        chapter_dir = self.fragments_dir / f"chapter-{chapter_id}"
+        fragment_path = chapter_dir / f"fragment_{fragment_id}.json"
 
         with open(fragment_path, encoding="utf-8") as f:
             fragment_data = json.load(f)
@@ -160,11 +182,12 @@ class FragmentReader:
             # New format: {"summary": "...", "sentences": [...]}
             return fragment_data["sentences"][sentence_index]["text"]
 
-    def get_summary(self, fragment_id: int) -> str:
+    def get_summary(self, chapter_id: int, fragment_id: int) -> str:
         """Load fragment summary.
 
         Args:
-            fragment_id: Fragment ID
+            chapter_id: Chapter ID
+            fragment_id: Fragment ID within chapter
 
         Returns:
             Summary text (empty string if not available)
@@ -172,7 +195,8 @@ class FragmentReader:
         Raises:
             FileNotFoundError: If fragment file doesn't exist
         """
-        fragment_path = self.fragments_dir / f"fragment_{fragment_id}.json"
+        chapter_dir = self.fragments_dir / f"chapter-{chapter_id}"
+        fragment_path = chapter_dir / f"fragment_{fragment_id}.json"
 
         with open(fragment_path, encoding="utf-8") as f:
             fragment_data = json.load(f)

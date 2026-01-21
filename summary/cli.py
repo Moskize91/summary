@@ -4,11 +4,58 @@ import argparse
 import sys
 from pathlib import Path
 
-from tiktoken import get_encoding
+from spacy.lang.xx import MultiLanguage
+from tiktoken import Encoding, get_encoding
 
 from .editor import compress_text
 from .llm import LLM
 from .topologization import TopologizationConfig, topologize
+
+
+def _prepare_input(input_file: Path, encoding: Encoding, batch_size: int = 50000) -> list[list[tuple[int, str]]]:
+    """Prepare input from file by splitting into sentences and counting tokens.
+
+    Args:
+        input_file: Path to input text file
+        encoding: Tiktoken encoding for token counting
+        batch_size: Maximum characters per batch for spaCy processing
+
+    Returns:
+        List with one chapter containing (token_count, sentence_text) tuples
+    """
+    # Load spaCy multilingual model with sentencizer (works for any language)
+    nlp = MultiLanguage()
+    nlp.add_pipe("sentencizer")
+
+    # Read file and generate text batches
+    text_buffer = ""
+    sentences = []
+
+    with open(input_file, encoding="utf-8") as f:
+        for line in f:
+            text_buffer += line
+
+            # Process batch when buffer reaches batch_size
+            if len(text_buffer) >= batch_size:
+                doc = nlp(text_buffer)
+                for sent in doc.sents:
+                    sentence_text = sent.text.strip()
+                    if sentence_text:
+                        token_count = len(encoding.encode(sentence_text))
+                        sentences.append((token_count, sentence_text))
+                text_buffer = ""
+
+    # Process remaining text
+    if text_buffer:
+        doc = nlp(text_buffer)
+        for sent in doc.sents:
+            sentence_text = sent.text.strip()
+            if sentence_text:
+                token_count = len(encoding.encode(sentence_text))
+                sentences.append((token_count, sentence_text))
+
+    # Return as single chapter
+    return [sentences]
 
 
 def main(args: list[str] | None = None) -> int:
@@ -156,14 +203,21 @@ def main(args: list[str] | None = None) -> int:
             "压缩此书，重点关注别人对朱元璋的看法，别人怎么对待朱元璋，以及朱元璋被他人以不同态度对待的反应。"
             "对于他人第一次见朱元璋的评价、反应、表情，必须一字不漏地原文保留。社会背景方面可以压缩和删节。"
         )
+
+        # Prepare input: read file, split sentences, count tokens
+        encoding = get_encoding("o200k_base")
+        print(f"Processing input file: {parsed_args.input_file}")
+        input_data = _prepare_input(parsed_args.input_file, encoding)
+        print(f"Prepared {len(input_data[0])} sentences")
+
         # Run topologization
         topologization = topologize(
             intention=intention,
-            input_file=parsed_args.input_file,
+            input=input_data,
             workspace_path=parsed_args.workspace,
             config=config,
             llm=llm,
-            encoding=get_encoding("o200k_base"),
+            encoding=encoding,
         )
         # Run compression
         compressed_text = compress_text(

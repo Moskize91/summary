@@ -70,16 +70,16 @@ class Chunk:
         """Get all sentence IDs that comprise this chunk.
 
         Returns:
-            List of (fragment_id, sentence_index) tuples
+            List of (chapter_id, fragment_id, sentence_index) tuples
         """
         if self._sentence_ids is None:
             # Query chunk_sentences table to get all sentences
             cursor = self._topologization._conn.execute(
-                "SELECT fragment_id, sentence_index FROM chunk_sentences WHERE chunk_id = ? "
-                "ORDER BY fragment_id, sentence_index",
+                "SELECT chapter_id, fragment_id, sentence_index FROM chunk_sentences WHERE chunk_id = ? "
+                "ORDER BY chapter_id, fragment_id, sentence_index",
                 (self.id,),
             )
-            self._sentence_ids = [(row[0], row[1]) for row in cursor]
+            self._sentence_ids = [(row[0], row[1], row[2]) for row in cursor]
 
         return self._sentence_ids
 
@@ -440,7 +440,7 @@ class Topologization:
         """
         cursor = self._conn.execute(
             (
-                "SELECT id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens, weight"
+                "SELECT id, generation, chapter_id, fragment_id, sentence_index, label, content, retention, importance, tokens, weight"
                 " FROM chunks WHERE id = ?"
             ),
             (chunk_id,),
@@ -452,13 +452,13 @@ class Topologization:
         return Chunk(
             id=row[0],
             generation=row[1],
-            sentence_id=(row[2], row[3]),
-            label=row[4],
-            content=row[5],
-            retention=row[6],
-            importance=row[7],
-            tokens=row[8],
-            weight=row[9],
+            sentence_id=(row[2], row[3], row[4]),
+            label=row[5],
+            content=row[6],
+            retention=row[7],
+            importance=row[8],
+            tokens=row[9],
+            weight=row[10],
             _topologization=self,
         )
 

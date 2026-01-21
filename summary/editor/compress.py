@@ -383,21 +383,27 @@ def _get_full_text(topologization: Topologization) -> str:
         Full text string
     """
     fragments_dir = topologization.workspace_path / "fragments"
-    fragment_files = sorted(fragments_dir.glob("fragment_*.json"), key=lambda p: int(p.stem.split("_")[1]))
+
+    # Get all chapter directories and sort by chapter ID
+    chapter_dirs = sorted(fragments_dir.glob("chapter-*"), key=lambda p: int(p.name.split("-")[1]))
 
     all_sentences = []
-    for fragment_file in fragment_files:
-        with open(fragment_file, encoding="utf-8") as f:
-            fragment_data = json.load(f)
+    for chapter_dir in chapter_dirs:
+        # Get all fragment files in this chapter and sort by fragment ID
+        fragment_files = sorted(chapter_dir.glob("fragment_*.json"), key=lambda p: int(p.stem.split("_")[1]))
 
-        # Handle both old format (list) and new format (dict with "sentences")
-        if isinstance(fragment_data, list):
-            sentences = fragment_data
-        else:
-            sentences = fragment_data["sentences"]
+        for fragment_file in fragment_files:
+            with open(fragment_file, encoding="utf-8") as f:
+                fragment_data = json.load(f)
 
-        for sentence in sentences:
-            all_sentences.append(sentence["text"])
+            # Handle both old format (list) and new format (dict with "sentences")
+            if isinstance(fragment_data, list):
+                sentences = fragment_data
+            else:
+                sentences = fragment_data["sentences"]
+
+            for sentence in sentences:
+                all_sentences.append(sentence["text"])
 
     return " ".join(all_sentences)
 

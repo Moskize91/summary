@@ -19,6 +19,7 @@ def create_schema(conn: sqlite3.Connection):
         CREATE TABLE IF NOT EXISTS chunks (
             id INTEGER PRIMARY KEY,
             generation INTEGER NOT NULL,
+            chapter_id INTEGER NOT NULL,
             fragment_id INTEGER NOT NULL,
             sentence_index INTEGER NOT NULL,
             label TEXT NOT NULL,
@@ -33,17 +34,18 @@ def create_schema(conn: sqlite3.Connection):
     # Index for sentence ID lookups
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_chunks_sentence
-        ON chunks(fragment_id, sentence_index)
+        ON chunks(chapter_id, fragment_id, sentence_index)
     """)
 
     # Chunk sentences table (many-to-many: chunks can span multiple sentences)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS chunk_sentences (
             chunk_id INTEGER NOT NULL,
+            chapter_id INTEGER NOT NULL,
             fragment_id INTEGER NOT NULL,
             sentence_index INTEGER NOT NULL,
             FOREIGN KEY (chunk_id) REFERENCES chunks(id),
-            PRIMARY KEY (chunk_id, fragment_id, sentence_index)
+            PRIMARY KEY (chunk_id, chapter_id, fragment_id, sentence_index)
         )
     """)
 
@@ -130,24 +132,24 @@ def insert_chunk(
     cursor = conn.cursor()
 
     # Insert chunk metadata
-    fragment_id, sentence_index = sentence_id
+    chapter_id, fragment_id, sentence_index = sentence_id
     cursor.execute(
         """
-        INSERT INTO chunks (id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens, weight)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO chunks (id, generation, chapter_id, fragment_id, sentence_index, label, content, retention, importance, tokens, weight)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (chunk_id, generation, fragment_id, sentence_index, label, content, retention, importance, tokens, weight),
+        (chunk_id, generation, chapter_id, fragment_id, sentence_index, label, content, retention, importance, tokens, weight),
     )
 
     # Insert chunk-sentence associations
     for sid in sentence_ids:
-        fid, sidx = sid
+        cid, fid, sidx = sid
         cursor.execute(
             """
-            INSERT INTO chunk_sentences (chunk_id, fragment_id, sentence_index)
-            VALUES (?, ?, ?)
+            INSERT INTO chunk_sentences (chunk_id, chapter_id, fragment_id, sentence_index)
+            VALUES (?, ?, ?, ?)
             """,
-            (chunk_id, fid, sidx),
+            (chunk_id, cid, fid, sidx),
         )
 
     conn.commit()
