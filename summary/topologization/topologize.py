@@ -286,7 +286,7 @@ class Topologization(ReadonlyTopologization):
         print(f"Next chunk ID: {self._next_chunk_id}\n")
 
         # Locks for concurrent access protection
-        self._id_lock = asyncio.Lock()  # Protect ID allocation (_next_chapter_id, _next_chunk_id)
+        self._id_lock = asyncio.Lock()  # Protect ID allocation
         self._guidance_lock = asyncio.Lock()  # Protect guidance generation
 
         # Extraction guidance cache (for intention changes)
@@ -310,11 +310,10 @@ class Topologization(ReadonlyTopologization):
                 self._extraction_guidance = await _generate_extraction_guidance(intention, self._llm)
                 self._last_intention = intention
 
-        # Allocate chapter ID and starting chunk ID (protected by lock)
+        # Allocate chapter ID (protected by lock)
         async with self._id_lock:
             chapter_id = self._next_chapter_id
             self._next_chapter_id += 1
-            starting_chunk_id = self._next_chunk_id
 
         print(f"\n{'=' * 60}")
         print(f"=== Loading Chapter {chapter_id} ===")
@@ -326,9 +325,15 @@ class Topologization(ReadonlyTopologization):
         # Load knowledge graph from database
         knowledge_graph_nx = _load_graph_from_database(self._conn)
 
+        # Create chunk ID generator with proper locking for concurrent access
+        async def generate_chunk_id() -> int:
+            async with self._id_lock:
+                chunk_id = self._next_chunk_id
+                self._next_chunk_id += 1
+                return chunk_id
+
         # Reset working memory (per-chapter independence)
-        working_memory = WorkingMemory(capacity=self._working_memory_capacity)
-        working_memory._next_id = starting_chunk_id  # Set starting chunk ID
+        working_memory = WorkingMemory(capacity=self._working_memory_capacity, id_generator=generate_chunk_id)
         # Note: generation resets to 0 automatically in new WorkingMemory
 
         # Create components for this chapter
@@ -348,10 +353,6 @@ class Topologization(ReadonlyTopologization):
             fragment_writer=fragment_writer,
             knowledge_graph_nx=knowledge_graph_nx,
         )
-
-        # Update next_chunk_id for next chapter (protected by lock)
-        async with self._id_lock:
-            self._next_chunk_id = working_memory._next_id
 
         # Save chunks and edges to database
         print(f"\nSaving chapter {chapter_id} to database...")
@@ -456,7 +457,7 @@ class Topologization(ReadonlyTopologization):
                 fragment_writer.set_summary(fragment_summary)
 
             # Add user-focused chunks to working memory and assign IDs
-            user_focused_chunks, user_focused_edges = working_memory.add_chunks_with_links(user_focused_result)
+            user_focused_chunks, user_focused_edges = await working_memory.add_chunks_with_links(user_focused_result)
 
             # Add user-focused chunks to knowledge graph
             for chunk in user_focused_chunks:
@@ -504,7 +505,7 @@ class Topologization(ReadonlyTopologization):
                                 break
 
                 # Add book-coherence chunks to working memory and assign IDs
-                book_coherence_chunks, book_coherence_edges = working_memory.add_chunks_with_links(
+                book_coherence_chunks, book_coherence_edges = await working_memory.add_chunks_with_links(
                     book_coherence_result
                 )
 

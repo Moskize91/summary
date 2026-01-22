@@ -1,3 +1,5 @@
+from collections.abc import Awaitable, Callable
+
 from .cognitive_chunk import ChunkBatch, CognitiveChunk
 
 
@@ -10,21 +12,24 @@ class WorkingMemory:
     - Capacity only applies to extra chunks, not current fragment chunks
     """
 
-    def __init__(self, capacity: int = 7):
+    def __init__(self, capacity: int, id_generator: Callable[[], Awaitable[int]]):
         """Initialize working memory.
 
         Args:
             capacity: Number of extra chunks to select from history
                      (default: 7, based on Miller's magic number)
                      Current fragment chunks do not count towards this limit
+            id_generator: Async callable that returns next available chunk ID
         """
         self.capacity = capacity
         self._current_fragment_chunks: list[CognitiveChunk] = []  # Chunks from current fragment
         self._extra_chunks: list[CognitiveChunk] = []  # Extra chunks selected from history
-        self._next_id = 1
+        self._id_generator = id_generator
         self._generation = 0  # Tracks how many times we've added new chunks
 
-    def add_chunks_with_links(self, chunk_batch: ChunkBatch) -> tuple[list[CognitiveChunk], list[tuple[int, int]]]:
+    async def add_chunks_with_links(
+        self, chunk_batch: ChunkBatch
+    ) -> tuple[list[CognitiveChunk], list[tuple[int, int]]]:
         """Add new chunks with link processing to working memory.
 
         New behavior: Only assigns IDs and adds to current fragment chunks.
@@ -41,10 +46,9 @@ class WorkingMemory:
 
         # Assign IDs and generation to new chunks
         for chunk, temp_id in zip(chunk_batch.chunks, chunk_batch.temp_ids):
-            chunk.id = self._next_id
+            chunk.id = await self._id_generator()
             chunk.generation = self._generation
             temp_id_map[temp_id] = chunk
-            self._next_id += 1
 
         # Add to current fragment chunks
         self._current_fragment_chunks.extend(chunk_batch.chunks)
