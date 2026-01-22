@@ -161,14 +161,14 @@ def summary(
     print("=" * 60)
 
     # Extract book title from input filename (remove .epub extension)
-    book_title = input_path.stem + " (压缩版)"
+    book_title = input_path.stem + " (summarized)"
 
     write_epub(
         chapters=compressed_chapters,
         output_path=output_path,
         book_title=book_title,
-        author="AI压缩",
-        language="zh",
+        author="AI Summarizer",
+        language="en",
     )
 
     # Print summary

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from json_repair import repair_json
 
-from ..llm import LLM
+from ..llm import LLM, LLMessage
 from ..topologization.api import Topologization
 from .clue import Clue, extract_clues_from_topologization
 from .markup import format_clue_as_book
@@ -637,10 +637,10 @@ def _compress_iteration(
     else:
         # Subsequent iterations: include previous attempt and feedback
         messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-            {"role": "assistant", "content": previous_compressed_text},
-            {"role": "user", "content": revision_feedback},
+            LLMessage(role="system", content=system_prompt),
+            LLMessage(role="user", content=user_message),
+            LLMessage(role="assistant", content=previous_compressed_text),
+            LLMessage(role="user", content=revision_feedback),
         ]
         response = llm.request_with_history(
             messages=messages,
@@ -696,10 +696,10 @@ def _review_compression(
             # Build conversation history: system + user(prev) + assistant(prev) + user(current)
             # All user messages contain only compressed text, no intention
             messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prev_compressed_text},
-                {"role": "assistant", "content": prev_response},
-                {"role": "user", "content": compressed_text},
+                LLMessage(role="system", content=system_prompt),
+                LLMessage(role="user", content=prev_compressed_text),
+                LLMessage(role="assistant", content=prev_response),
+                LLMessage(role="user", content=compressed_text),
             ]
             response = llm.request_with_history(
                 messages=messages,
