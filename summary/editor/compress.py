@@ -141,6 +141,78 @@ class CompressionVersion:
     reviews: list[ReviewResult]
 
 
+def _format_chunk_hierarchy(topologization: Topologization, chapter_id: int, group_id: int) -> str:
+    """Format chunk hierarchy for logging: Group -> Snakes -> Chunks.
+
+    Shows the 3-level structure:
+    - Group (chapter_id + group_id)
+    - Snakes (with snake_id, weight, label)
+    - Chunks (with retention, importance, content preview)
+
+    Args:
+        topologization: Topologization object
+        chapter_id: Chapter ID
+        group_id: Group ID
+
+    Returns:
+        Formatted hierarchy string
+    """
+    lines = []
+    lines.append("=" * 80)
+    lines.append(f"CHUNK HIERARCHY - Chapter {chapter_id}, Group {group_id}")
+    lines.append("=" * 80)
+    lines.append("")
+
+    # Get snake graph for this group
+    snake_graph = topologization.get_snake_graph(chapter_id, group_id)
+    snakes = list(snake_graph)
+
+    if not snakes:
+        lines.append("(No snakes found in this group)")
+        lines.append("")
+        return "\n".join(lines)
+
+    # Sort snakes by weight descending
+    snakes.sort(key=lambda s: s.weight, reverse=True)
+
+    for snake_idx, snake in enumerate(snakes, 1):
+        # Snake header
+        lines.append(f"Snake #{snake_idx} (ID: {snake.snake_id})")
+        lines.append(f"├─ Weight: {snake.weight:.4f}")
+        lines.append(f"├─ Label: {snake.first_label} → {snake.last_label}")
+        lines.append(f"├─ Chunks: {snake.size}")
+        lines.append(f"└─ Tokens: {snake.tokens}")
+        lines.append("")
+
+        # Get chunks in this snake
+        chunks = snake.get_chunks()
+
+        for chunk_idx, chunk in enumerate(chunks, 1):
+            is_last_chunk = chunk_idx == len(chunks)
+            prefix = "    └─" if is_last_chunk else "    ├─"
+            continuation = "      " if is_last_chunk else "    │ "
+
+            # Chunk info
+            lines.append(f"{prefix} Chunk {chunk_idx}/{len(chunks)} (ID: {chunk.id})")
+            lines.append(f"{continuation} • Label: {chunk.label}")
+            lines.append(f"{continuation} • Retention: {chunk.retention or 'N/A'}")
+            lines.append(f"{continuation} • Importance: {chunk.importance or 'N/A'}")
+
+            # Content preview (first 60 chars)
+            content_preview = chunk.content[:60] + "..." if len(chunk.content) > 60 else chunk.content
+            lines.append(f"{continuation} • Content: {content_preview}")
+
+            if not is_last_chunk:
+                lines.append(f"{continuation}")
+
+        lines.append("")
+
+    lines.append("=" * 80)
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def compress_text(
     topologization: Topologization,
     chapter_id: int,
@@ -187,6 +259,11 @@ def compress_text(
             f.write(f"Max iterations: {max_iterations}\n")
             f.write("\n\n")
 
+            # Write chunk hierarchy
+            hierarchy = _format_chunk_hierarchy(topologization, chapter_id, group_id)
+            f.write(hierarchy)
+            f.write("\n")
+
     # Step 1: Get original text for this group
     print("\nStep 1: Loading original text...")
     original_text = _get_full_text(topologization, chapter_id, group_id)
@@ -223,6 +300,7 @@ def compress_text(
     versions: list[CompressionVersion] = []
     previous_compressed_text: str | None = None
     revision_feedback: str | None = None
+    previous_reviews: list[ReviewResult] | None = None  # Store reviews for logging in next iteration
     reviewer_histories: dict[int, tuple[str, str]] = {}  # clue_id -> (prev_compressed_text, prev_response)
 
     for iteration in range(1, max_iterations + 1):
@@ -281,16 +359,6 @@ def compress_text(
             reviewer_histories=reviewer_histories if reviewer_histories else None,
         )
 
-        # Log reviewer output summary to file
-        if log_file is not None:
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write("Reviewer Output Summary:\n")
-                f.write(f"{'-' * 80}\n")
-                for review in reviews:
-                    issue_count = len(review.issues)
-                    f.write(f"Clue {review.clue_id}: output {issue_count} issue(s)\n")
-                f.write(f"{'-' * 80}\n\n")
-
         # 4.3 Calculate score (lower is better)
         score = _calculate_score(reviews)
         print(f"Issue score: {score:.2f} (lower is better)")
@@ -314,38 +382,9 @@ def compress_text(
         if iteration < max_iterations:
             print("Preparing revision feedback...")
 
-            # First, build the same sorted issue list as _collect_feedback() for logging
-            if log_file is not None:
-                severity_values = {"critical": 9, "major": 3, "minor": 1}
-                all_issues_for_log = []
-                for review in reviews:
-                    for issue_index, issue in enumerate(review.issues):
-                        severity = issue.get("severity", "minor").lower()
-                        severity_value = severity_values.get(severity, 1)
-                        all_issues_for_log.append(
-                            {
-                                "clue_id": review.clue_id,
-                                "issue_index": issue_index,
-                                "severity_value": severity_value,
-                                "weight": review.weight,
-                            }
-                        )
-
-                # Sort by same logic as _collect_feedback()
-                all_issues_for_log.sort(key=lambda x: (-x["severity_value"], -x["weight"], x["issue_index"]))
-
-                # Write Issue Index Table
-                with open(log_file, "a", encoding="utf-8") as f:
-                    f.write("Issue Index Table (for debugging):\n")
-                    f.write(f"{'-' * 80}\n")
-                    for i, issue in enumerate(all_issues_for_log, 1):
-                        f.write(f"  Issue #{i}: Clue {issue['clue_id']}, Index {issue['issue_index']}\n")
-                    f.write(f"{'-' * 80}\n\n")
-                    f.write(f"Score: {score:.2f}\n")
-                    f.write(f"{'-' * 80}\n\n")
-
             revision_feedback = _collect_feedback(reviews, llm)
             previous_compressed_text = compressed_text
+            previous_reviews = reviews  # Store reviews for logging in next iteration
 
             # Update reviewer histories for next iteration
             for clue_id, raw_response in raw_responses.items():
@@ -726,6 +765,70 @@ def _calculate_score(reviews: list[ReviewResult]) -> float:
             total_score += severity_value * review.weight
 
     return total_score
+
+
+def _format_issues_for_log(reviews: list[ReviewResult]) -> str:
+    """Format all issues for logging (including hidden ones), with visual separation.
+
+    Args:
+        reviews: List of ReviewResult objects
+
+    Returns:
+        Formatted string with all issues, visually separated between visible and hidden
+    """
+    severity_values = {"critical": 9, "major": 3, "minor": 1}
+
+    # Collect all issues with metadata
+    all_issues = []
+    for review in reviews:
+        for issue_index, issue in enumerate(review.issues):
+            severity = issue.get("severity", "minor").lower()
+            severity_value = severity_values.get(severity, 1)
+            all_issues.append(
+                {
+                    "clue_id": review.clue_id,
+                    "issue_index": issue_index,
+                    "severity": severity,
+                    "severity_value": severity_value,
+                    "weight": review.weight,
+                    "description": issue.get("missing_info") or issue.get("problem", "No description"),
+                    "suggestion": issue.get("suggestion", ""),
+                }
+            )
+
+    if not all_issues:
+        return "No issues found - all reviewers are satisfied."
+
+    # Sort by (severity_value DESC, weight DESC, issue_index ASC)
+    all_issues.sort(key=lambda x: (-x["severity_value"], -x["weight"], x["issue_index"]))
+
+    # Format all issues with visual separation
+    issues_lines = []
+    visible_count = min(9, len(all_issues))
+
+    # Format visible issues (AI can see these)
+    for i, issue in enumerate(all_issues[:visible_count], 1):
+        issues_lines.append(f"{i}. [{issue['severity'].upper()}]")
+        issues_lines.append(f"   Problem: {issue['description']}")
+        if issue["suggestion"]:
+            issues_lines.append(f"   Suggestion: {issue['suggestion']}")
+        issues_lines.append("")
+
+    # Add separator and hidden issues if any
+    if len(all_issues) > visible_count:
+        issues_lines.append("=" * 80)
+        issues_lines.append("HIDDEN ISSUES (AI cannot see below, for debugging only)")
+        issues_lines.append("=" * 80)
+        issues_lines.append("")
+
+        for i, issue in enumerate(all_issues[visible_count:], visible_count + 1):
+            issues_lines.append(f"{i}. [{issue['severity'].upper()}]")
+            issues_lines.append(f"   Problem: {issue['description']}")
+            if issue["suggestion"]:
+                issues_lines.append(f"   Suggestion: {issue['suggestion']}")
+            issues_lines.append("")
+
+    return "\n".join(issues_lines)
 
 
 def _collect_feedback(reviews: list[ReviewResult], llm: LLM) -> str:
