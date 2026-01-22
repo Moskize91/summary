@@ -92,7 +92,7 @@ def write_epub(
             file_name=chapter_file_name,
             lang=language,
         )
-        epub_chapter.content = chapter_content
+        epub_chapter.content = chapter_content.encode("utf-8")
         epub_chapter.add_item(nav_css)
 
         # Add to book
