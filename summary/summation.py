@@ -11,7 +11,7 @@ from .llm import LLM
 from .topologization import Topologization
 
 
-def summary(
+async def summary(
     intention: str,
     input_epub_file: PathLike | str,
     output_epub_file: PathLike | str,
@@ -109,7 +109,7 @@ def summary(
         print(f"  Loading: {chapter_title} ({len(sentences_list)} sentences)")
 
         # Load chapter and get its ID
-        chapter_id = topologization.load(sentences_list, intention)
+        chapter_id = await topologization.load(sentences_list, intention)
         chapter_info.append((chapter_id, chapter_title))
 
     print(f"Total chapters loaded: {len(chapter_info)}")
@@ -136,7 +136,7 @@ def summary(
             print(f"  Compressing Group {group_id}...")
 
             # Compress this group
-            compressed_text = compress_text(
+            compressed_text = await compress_text(
                 topologization=topologization,
                 chapter_id=chapter_id,
                 group_id=group_id,

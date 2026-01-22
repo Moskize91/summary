@@ -1,10 +1,12 @@
+import asyncio
 import json
 import shutil
 from pathlib import Path
 
 from summary import summary
 
-if __name__ == "__main__":
+
+async def main():
     # Setup paths based on original configuration
     project_root = Path(__file__).parent.resolve()
     input_file = project_root / "tests" / "assets" / "明朝那些事儿.epub"
@@ -41,7 +43,7 @@ if __name__ == "__main__":
     )
 
     # Call summary function
-    summary(
+    await summary(
         intention=intention,
         input_epub_file=input_file,
         output_epub_file=output_file,
@@ -55,3 +57,7 @@ if __name__ == "__main__":
         llm_temperature=llm_config.get("temperature", 0.6),
         llm_top_p=llm_config.get("top_p", 0.6),
     )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

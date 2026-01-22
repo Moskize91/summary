@@ -121,7 +121,7 @@ class FragmentWriter:
         # Build fragment data structure
         fragment_data = {
             "summary": self.current_summary or "",  # Empty string if no summary provided
-            "sentences": [{"text": s.text, "token_count": s.token_count} for s in self.current_sentences]
+            "sentences": [{"text": s.text, "token_count": s.token_count} for s in self.current_sentences],
         }
 
         with open(fragment_path, "w", encoding="utf-8") as f:

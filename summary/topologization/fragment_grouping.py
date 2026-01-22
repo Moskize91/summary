@@ -356,7 +356,9 @@ def group_fragments_by_chapter(
         # Extract fragment IDs from each group (only body, since gap_rate=0)
         for group_id, group in enumerate(groups):
             fragment_ids = [
-                resource.payload for segment in group.body for resource in segment.resources  # type: ignore
+                resource.payload
+                for segment in group.body
+                for resource in segment.resources  # type: ignore
             ]
             all_groups.append(
                 GroupInfo(

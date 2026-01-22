@@ -6,7 +6,7 @@ merging low-weight snakes to reduce reviewer count.
 
 from dataclasses import dataclass
 
-from ..topologization.api import Chunk, Snake, Topologization
+from ..topologization import Chunk, Snake, Topologization
 
 
 @dataclass

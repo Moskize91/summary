@@ -9,7 +9,7 @@ from pathlib import Path
 from json_repair import repair_json
 
 from ..llm import LLM, LLMessage
-from ..topologization.api import Topologization
+from ..topologization import Topologization
 from .clue import Clue, extract_clues_from_topologization
 from .markup import format_clue_as_book
 
@@ -213,7 +213,7 @@ def _format_chunk_hierarchy(topologization: Topologization, chapter_id: int, gro
     return "\n".join(lines)
 
 
-def compress_text(
+async def compress_text(
     topologization: Topologization,
     chapter_id: int,
     group_id: int,
@@ -288,7 +288,7 @@ def compress_text(
 
     # Step 3: Generate reviewer info for each clue
     print("\nStep 3: Generating clue reviewers...")
-    clue_reviewers = _generate_clue_reviewers(clues, llm, topologization)
+    clue_reviewers = await _generate_clue_reviewers(clues, llm, topologization)
     print(f"Generated {len(clue_reviewers)} clue reviewers")
 
     # Step 4: Calculate target length
@@ -322,7 +322,7 @@ def compress_text(
 
         # 4.1 Compress text
         print("Compressing text...")
-        full_response, compressed_text = _compress_iteration(
+        full_response, compressed_text = await _compress_iteration(
             marked_text=marked_original_text,
             target_length=target_length,
             compression_ratio=compression_ratio,
@@ -352,7 +352,7 @@ def compress_text(
 
         # 4.2 Review with all reviewers
         print("Reviewing compressed text...")
-        reviews, raw_responses = _review_compression(
+        reviews, raw_responses = await _review_compression(
             compressed_text=compressed_text,
             clue_reviewers=clue_reviewers,
             llm=llm,
@@ -384,7 +384,6 @@ def compress_text(
 
             revision_feedback = _collect_feedback(reviews, llm)
             previous_compressed_text = compressed_text
-            previous_reviews = reviews  # Store reviews for logging in next iteration
 
             # Update reviewer histories for next iteration
             for clue_id, raw_response in raw_responses.items():
@@ -521,7 +520,7 @@ def _get_marked_full_text(topologization: Topologization, clues: list[Clue], cha
     return marked_text
 
 
-def _generate_clue_reviewers(
+async def _generate_clue_reviewers(
     clues: list[Clue],
     llm: LLM,
     topologization: Topologization,
@@ -554,7 +553,7 @@ def _generate_clue_reviewers(
         info_system_prompt = llm.load_system_prompt(info_prompt_path)
         user_message = clue_text
 
-        info_response = llm.request(
+        info_response = await llm.request(
             system_prompt=info_system_prompt,
             user_message=user_message,
             temperature=0.3,
@@ -582,7 +581,7 @@ def _generate_clue_reviewers(
     return clue_reviewers
 
 
-def _compress_iteration(
+async def _compress_iteration(
     marked_text: str,
     target_length: int,
     compression_ratio: float,
@@ -629,7 +628,7 @@ def _compress_iteration(
 
     if previous_compressed_text is None or revision_feedback is None:
         # First iteration: simple request
-        response = llm.request(
+        response = await llm.request(
             system_prompt=system_prompt,
             user_message=user_message,
             temperature=0.5,
@@ -642,7 +641,7 @@ def _compress_iteration(
             LLMessage(role="assistant", content=previous_compressed_text),
             LLMessage(role="user", content=revision_feedback),
         ]
-        response = llm.request_with_history(
+        response = await llm.request_with_history(
             messages=messages,
             temperature=0.5,
         )
@@ -661,7 +660,7 @@ def _compress_iteration(
     return full_response, compressed_text
 
 
-def _review_compression(
+async def _review_compression(
     compressed_text: str,
     clue_reviewers: list[ClueReviewerInfo],
     llm: LLM,
@@ -701,13 +700,13 @@ def _review_compression(
                 LLMessage(role="assistant", content=prev_response),
                 LLMessage(role="user", content=compressed_text),
             ]
-            response = llm.request_with_history(
+            response = await llm.request_with_history(
                 messages=messages,
                 temperature=0.3,
             )
         else:
             # First iteration: simple request with only compressed text
-            response = llm.request(
+            response = await llm.request(
                 system_prompt=system_prompt,
                 user_message=compressed_text,
                 temperature=0.3,

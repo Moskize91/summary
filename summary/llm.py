@@ -1,5 +1,6 @@
 """LLM client with logging and caching support."""
 
+import asyncio
 import datetime
 import hashlib
 import json
@@ -8,10 +9,10 @@ from dataclasses import dataclass
 from io import StringIO
 from logging import DEBUG, FileHandler, Formatter, Logger, getLogger
 from pathlib import Path
-from time import sleep
 from typing import cast
 
-from openai import OpenAI
+import aiofiles
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from .template import create_env
@@ -70,7 +71,7 @@ class LLM:
             "top_p": top_p,
         }
 
-        self.client = OpenAI(
+        self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
             timeout=timeout,
@@ -89,7 +90,7 @@ class LLM:
         self._log_dir_path = self._ensure_dir_path(log_dir_path)
         self._cache_dir_path = self._ensure_dir_path(cache_dir_path)
 
-    def request(
+    async def request(
         self,
         system_prompt: str,
         user_message: str,
@@ -111,9 +112,9 @@ class LLM:
             LLMessage(role="system", content=system_prompt),
             LLMessage(role="user", content=user_message),
         ]
-        return self.request_with_history(messages, temperature, top_p)
+        return await self.request_with_history(messages, temperature, top_p)
 
-    def request_with_history(
+    async def request_with_history(
         self,
         messages: list[LLMessage],
         temperature: float | None = None,
@@ -168,7 +169,8 @@ class LLM:
         if cache_key is not None and self._cache_dir_path is not None:
             cache_file = self._cache_dir_path / f"{cache_key}.txt"
             if cache_file.exists():
-                cached_response = cache_file.read_text(encoding="utf-8")
+                async with aiofiles.open(cache_file, encoding="utf-8") as f:
+                    cached_response = await f.read()
                 print(f"[Cache Hit] Using cached response (key: {cache_key[:12]}...)")
                 if logger is not None:
                     logger.debug("[[Response]] (from cache):\n%s\n", cached_response)
@@ -183,7 +185,7 @@ class LLM:
                 try:
                     # Convert LLMessage objects to dict format for OpenAI API
                     messages_dict = [{"role": msg.role, "content": msg.content} for msg in messages]
-                    completion = self.client.chat.completions.create(
+                    completion = await self.client.chat.completions.create(
                         model=self.model,
                         messages=cast(list[ChatCompletionMessageParam], messages_dict),
                         temperature=temperature,
@@ -208,7 +210,7 @@ class LLM:
                         logger.warning("Request failed with connection error, retrying... (%s times)", i + 1)
 
                     if self.retry_interval_seconds > 0.0 and i < self.retry_times:
-                        sleep(self.retry_interval_seconds)
+                        await asyncio.sleep(self.retry_interval_seconds)
                     continue
 
         except KeyboardInterrupt as err:
@@ -224,7 +226,8 @@ class LLM:
         # Save to cache (only cache non-empty responses)
         if self._cache_dir_path is not None and cache_key is not None and response:
             cache_file = self._cache_dir_path / f"{cache_key}.txt"
-            cache_file.write_text(response, encoding="utf-8")
+            async with aiofiles.open(cache_file, "w", encoding="utf-8") as f:
+                await f.write(response)
 
         return response
 

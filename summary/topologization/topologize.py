@@ -288,7 +288,7 @@ class Topologization(ReadonlyTopologization):
         self._extraction_guidance: str | None = None
         self._last_intention: str | None = None
 
-    def load(self, sentences: Iterable[tuple[int, str]], intention: str) -> int:
+    async def load(self, sentences: Iterable[tuple[int, str]], intention: str) -> int:
         """Load one chapter and return its chapter_id.
 
         Args:
@@ -301,7 +301,7 @@ class Topologization(ReadonlyTopologization):
         # Check if intention changed, regenerate guidance if needed
         if self._extraction_guidance is None or self._last_intention != intention:
             print("\n=== Meta-Prompt: Generating Extraction Guidance ===")
-            self._extraction_guidance = _generate_extraction_guidance(intention, self._llm)
+            self._extraction_guidance = await _generate_extraction_guidance(intention, self._llm)
             self._last_intention = intention
 
         # Get chapter ID and increment
@@ -331,7 +331,7 @@ class Topologization(ReadonlyTopologization):
         fragment_writer.start_chapter(chapter_id)
 
         # Extract knowledge graph for this chapter
-        chapter_chunks = self._extract_chapter_knowledge_graph(
+        chapter_chunks = await self._extract_chapter_knowledge_graph(
             chapter_id=chapter_id,
             sentences=sentences,
             extractor=extractor,
@@ -393,7 +393,7 @@ class Topologization(ReadonlyTopologization):
 
         return chapter_id
 
-    def _extract_chapter_knowledge_graph(
+    async def _extract_chapter_knowledge_graph(
         self,
         chapter_id: int,
         sentences: Iterable[tuple[int, str]],
@@ -430,7 +430,7 @@ class Topologization(ReadonlyTopologization):
             print(f"Processing chapter {chapter_id}, fragment {fragment_count}...")
 
             # === Stage 1: Extract user-focused chunks ===
-            user_focused_result, fragment_summary = extractor.extract_user_focused(
+            user_focused_result, fragment_summary = await extractor.extract_user_focused(
                 fragment_with_sentences.text,
                 working_memory,
                 fragment_with_sentences.sentence_ids,
@@ -472,7 +472,7 @@ class Topologization(ReadonlyTopologization):
             chapter_chunks.extend(user_focused_chunks)
 
             # === Stage 2: Extract book-coherence chunks ===
-            book_coherence_result = extractor.extract_book_coherence(
+            book_coherence_result = await extractor.extract_book_coherence(
                 fragment_with_sentences.text,
                 working_memory,
                 user_focused_chunks,
@@ -596,7 +596,7 @@ def _load_graph_from_database(conn: sqlite3.Connection) -> nx.DiGraph:
     return graph
 
 
-def _generate_extraction_guidance(
+async def _generate_extraction_guidance(
     intention: str,
     llm: LLM,
 ) -> str:
@@ -620,7 +620,7 @@ def _generate_extraction_guidance(
         intention_prompt_file,
         intention=intention,
     )
-    response = llm.request(
+    response = await llm.request(
         system_prompt=system_prompt,
         user_message=intention,
         temperature=0.3,

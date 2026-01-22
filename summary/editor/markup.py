@@ -4,7 +4,7 @@ Formats clue chunks as book-like text with XML-style markup for AI consumption.
 Handles fragment loading, chunk overlap merging, and non-continuous chunk splitting.
 """
 
-from ..topologization.api import Topologization
+from ..topologization import Topologization
 from ..topologization.fragment import FragmentReader, SentenceId
 
 

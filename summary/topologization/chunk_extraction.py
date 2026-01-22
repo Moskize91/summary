@@ -29,7 +29,7 @@ class ChunkExtractor:
         self.user_focused_template = data_dir / "user_focused_extraction.jinja"
         self.book_coherence_template = data_dir / "book_coherence_extraction.jinja"
 
-    def extract_user_focused(
+    async def extract_user_focused(
         self,
         text: str,
         working_memory: WorkingMemory,
@@ -59,7 +59,7 @@ class ChunkExtractor:
         )
 
         # Call LLM
-        response = self.llm.request(
+        response = await self.llm.request(
             system_prompt=system_prompt,
             user_message=text,
             temperature=0.3,
@@ -79,7 +79,7 @@ class ChunkExtractor:
         )
         return chunk_batch, fragment_summary
 
-    def extract_book_coherence(
+    async def extract_book_coherence(
         self,
         text: str,
         working_memory: WorkingMemory,
@@ -121,7 +121,7 @@ class ChunkExtractor:
         )
 
         # Call LLM
-        response = self.llm.request(
+        response = await self.llm.request(
             system_prompt=system_prompt,
             user_message=text,
             temperature=0.3,
