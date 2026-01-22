@@ -17,29 +17,33 @@ class Sentence:
 
 
 class FragmentWriter:
-    """Manages fragment storage during text processing.
+    """Manages fragment storage during text processing for a single chapter.
 
     Each fragment corresponds to one LLM request and is stored as:
     fragments/chapter-N/fragment-M.json where N is chapter_id and M is fragment_id.
     Fragment IDs are scoped per-chapter (start from 0 for each chapter).
+
+    Note: Each chapter should have its own FragmentWriter instance.
     """
 
-    def __init__(self, workspace_path: Path):
-        """Initialize fragment writer.
+    def __init__(self, workspace_path: Path, chapter_id: int):
+        """Initialize fragment writer for a specific chapter.
 
         Args:
             workspace_path: Root workspace directory
+            chapter_id: Chapter ID for this writer instance
         """
         self.workspace_path = workspace_path
         self.fragments_dir = workspace_path / "fragments"
-        self.current_chapter_id = 0  # Current chapter being processed
+        self.chapter_id = chapter_id
         self.next_fragment_id = 0  # Fragment ID within current chapter
         self.current_sentences: list[Sentence] = []
         self.current_summary: str | None = None  # Summary for current fragment
         self.is_fragment_open = False
 
-        # Ensure fragments directory exists
-        self.fragments_dir.mkdir(parents=True, exist_ok=True)
+        # Create fragments directory and chapter subdirectory
+        self.chapter_dir = self.fragments_dir / f"chapter-{chapter_id}"
+        self.chapter_dir.mkdir(parents=True, exist_ok=True)
 
     def start_fragment(self):
         """Start a new fragment for collecting sentences."""
@@ -49,24 +53,6 @@ class FragmentWriter:
         self.current_summary = None
         self.is_fragment_open = True
 
-    def start_chapter(self, chapter_id: int):
-        """Start processing a new chapter. Resets fragment_id to 0.
-
-        Args:
-            chapter_id: Chapter ID (usually from enumeration)
-
-        Raises:
-            RuntimeError: If a fragment is currently open
-        """
-        if self.is_fragment_open:
-            raise RuntimeError("Cannot start new chapter: current fragment not ended")
-
-        self.current_chapter_id = chapter_id
-        self.next_fragment_id = 0  # Reset fragment ID for new chapter
-
-        # Create chapter directory
-        chapter_dir = self.fragments_dir / f"chapter-{chapter_id}"
-        chapter_dir.mkdir(parents=True, exist_ok=True)
 
     def set_summary(self, summary: str):
         """Set summary for current fragment.
@@ -101,7 +87,7 @@ class FragmentWriter:
         self.current_sentences.append(Sentence(text=text, token_count=token_count))
 
         # Return 3-tuple with chapter_id
-        return (self.current_chapter_id, self.next_fragment_id, sentence_index)
+        return (self.chapter_id, self.next_fragment_id, sentence_index)
 
     def end_fragment(self):
         """Write current fragment to disk and prepare for next fragment."""
@@ -115,8 +101,7 @@ class FragmentWriter:
             return
 
         # Write fragment file in chapter subdirectory
-        chapter_dir = self.fragments_dir / f"chapter-{self.current_chapter_id}"
-        fragment_path = chapter_dir / f"fragment_{self.next_fragment_id}.json"
+        fragment_path = self.chapter_dir / f"fragment_{self.next_fragment_id}.json"
 
         # Build fragment data structure
         fragment_data = {

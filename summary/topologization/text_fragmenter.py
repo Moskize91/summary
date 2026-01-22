@@ -19,7 +19,7 @@ class FragmentWithSentences:
 
 
 class TextFragmenter:
-    """Splits pre-processed sentences into fragments grouped by chapters.
+    """Splits pre-processed sentences into fragments for a single chapter.
 
     Integrates with FragmentWriter to store sentences in workspace fragments.
     """
@@ -33,7 +33,7 @@ class TextFragmenter:
         """Initialize the text fragmenter.
 
         Args:
-            fragment_writer: FragmentWriter for storing sentences
+            fragment_writer: FragmentWriter for storing sentences (already initialized with chapter_id)
             encoding: Tiktoken encoding for token counting (not used, kept for compatibility)
             max_fragment_tokens: Maximum token count for each fragment
         """
@@ -42,85 +42,75 @@ class TextFragmenter:
         self.max_fragment_tokens = max_fragment_tokens
 
     def stream_fragments(
-        self, input: Iterable[Iterable[tuple[int, str]]]
+        self, sentences: Iterable[tuple[int, str]]
     ) -> Generator[FragmentWithSentences, None, None]:
-        """Stream text fragments from pre-processed chapter structure.
+        """Stream text fragments from pre-processed sentences for a single chapter.
 
         NOTE: Fragments are yielded with fragment_writer still open (fragment not ended yet).
         The caller should call set_summary() if needed, then the next iteration will end it.
         The last fragment must be ended by calling finalize().
 
         Args:
-            input: Outer iterable yields chapters (enumerated to get chapter_id from 0)
-                   Inner iterable yields (token_count, sentence_text) tuples
+            sentences: Iterable of (token_count, sentence_text) tuples for this chapter
 
         Yields:
             FragmentWithSentences objects with chapter-aware sentence IDs
         """
-        fragment_pending = False  # Track if there's a fragment waiting to be ended (across chapters)
+        fragment_pending = False  # Track if there's a fragment waiting to be ended
 
-        for chapter_id, chapter_sentences in enumerate(input):
-            # End previous chapter's last fragment before starting new chapter
-            if fragment_pending:
-                self.fragment_writer.end_fragment()
-                fragment_pending = False
+        current_fragment = []
+        current_fragment_tokens = 0
+        current_sentence_ids = []
+        current_sentence_texts = []
+        current_sentence_token_counts = []
 
-            # Start new chapter
-            self.fragment_writer.start_chapter(chapter_id)
+        for token_count, sentence_text in sentences:
+            sentence_text = sentence_text.strip()
+            if not sentence_text:
+                continue
 
-            current_fragment = []
-            current_fragment_tokens = 0
-            current_sentence_ids = []
-            current_sentence_texts = []
-            current_sentence_token_counts = []
-
-            for token_count, sentence_text in chapter_sentences:
-                sentence_text = sentence_text.strip()
-                if not sentence_text:
-                    continue
-
-                # Yield fragment if adding sentence would exceed limit
-                if current_fragment and current_fragment_tokens + token_count > self.max_fragment_tokens:
-                    # Yield current fragment (WITHOUT ending it yet - caller can still set_summary)
-                    yield FragmentWithSentences(
-                        text="".join(current_fragment),
-                        sentence_ids=current_sentence_ids.copy(),
-                        sentence_texts=current_sentence_texts.copy(),
-                        sentence_token_counts=current_sentence_token_counts.copy(),
-                    )
-                    fragment_pending = True
-                    current_fragment = []
-                    current_fragment_tokens = 0
-                    current_sentence_ids = []
-                    current_sentence_texts = []
-                    current_sentence_token_counts = []
-
-                # Start new fragment if needed (first sentence of new fragment)
-                if not current_fragment:
-                    # End previous fragment if it's still pending
-                    if fragment_pending:
-                        self.fragment_writer.end_fragment()
-                        fragment_pending = False
-                    self.fragment_writer.start_fragment()
-
-                # Add sentence to fragment writer and get sentence ID (now 3-tuple with chapter_id)
-                sentence_id = self.fragment_writer.add_sentence(sentence_text, token_count)
-
-                current_fragment.append(sentence_text)
-                current_fragment_tokens += token_count
-                current_sentence_ids.append(sentence_id)
-                current_sentence_texts.append(sentence_text)
-                current_sentence_token_counts.append(token_count)
-
-            # Yield the last fragment of this chapter if it exists (WITHOUT ending it yet)
-            if current_fragment:
+            # Yield fragment if adding sentence would exceed limit
+            if current_fragment and current_fragment_tokens + token_count > self.max_fragment_tokens:
+                # Yield current fragment (WITHOUT ending it yet - caller can still set_summary)
                 yield FragmentWithSentences(
                     text="".join(current_fragment),
                     sentence_ids=current_sentence_ids.copy(),
                     sentence_texts=current_sentence_texts.copy(),
                     sentence_token_counts=current_sentence_token_counts.copy(),
                 )
-                fragment_pending = True  # Mark fragment as pending for next chapter or finalize()
+                fragment_pending = True
+                current_fragment = []
+                current_fragment_tokens = 0
+                current_sentence_ids = []
+                current_sentence_texts = []
+                current_sentence_token_counts = []
+
+            # Start new fragment if needed (first sentence of new fragment)
+            if not current_fragment:
+                # End previous fragment if it's still pending
+                if fragment_pending:
+                    self.fragment_writer.end_fragment()
+                    fragment_pending = False
+                self.fragment_writer.start_fragment()
+
+            # Add sentence to fragment writer and get sentence ID (3-tuple with chapter_id)
+            sentence_id = self.fragment_writer.add_sentence(sentence_text, token_count)
+
+            current_fragment.append(sentence_text)
+            current_fragment_tokens += token_count
+            current_sentence_ids.append(sentence_id)
+            current_sentence_texts.append(sentence_text)
+            current_sentence_token_counts.append(token_count)
+
+        # Yield the last fragment if it exists (WITHOUT ending it yet)
+        if current_fragment:
+            yield FragmentWithSentences(
+                text="".join(current_fragment),
+                sentence_ids=current_sentence_ids.copy(),
+                sentence_texts=current_sentence_texts.copy(),
+                sentence_token_counts=current_sentence_token_counts.copy(),
+            )
+            fragment_pending = True  # Mark fragment as pending for finalize()
 
     def finalize(self):
         """Finalize text fragmentation and flush remaining fragments."""

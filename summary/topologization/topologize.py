@@ -319,8 +319,8 @@ class Topologization(ReadonlyTopologization):
         print(f"=== Loading Chapter {chapter_id} ===")
         print(f"{'=' * 60}")
 
-        # Initialize fragment writer for this load session
-        fragment_writer = FragmentWriter(self.workspace_path)
+        # Initialize fragment writer for this chapter
+        fragment_writer = FragmentWriter(self.workspace_path, chapter_id)
 
         # Load knowledge graph from database
         knowledge_graph_nx = _load_graph_from_database(self._conn)
@@ -339,9 +339,6 @@ class Topologization(ReadonlyTopologization):
         # Create components for this chapter
         wave_reflection = WaveReflection(generation_decay_factor=_GENERATION_DECAY_FACTOR)
         extractor = ChunkExtractor(self._llm, self._extraction_guidance)
-
-        # Start this chapter in fragment writer
-        fragment_writer.start_chapter(chapter_id)
 
         # Extract knowledge graph for this chapter
         chapter_chunks = await self._extract_chapter_knowledge_graph(
@@ -434,7 +431,7 @@ class Topologization(ReadonlyTopologization):
         fragment_count = 0
 
         # Fragment this chapter's sentences
-        for fragment_with_sentences in fragmenter.stream_fragments([sentences]):
+        for fragment_with_sentences in fragmenter.stream_fragments(sentences):
             fragment_count += 1
 
             print(f"Processing chapter {chapter_id}, fragment {fragment_count}...")
