@@ -41,19 +41,21 @@ Both retention levels (for user-focused chunks) and importance levels (for book-
 
 | retention | importance | Priority Level | Completely Missing | Mentioned but Incomplete |
 |-----------|-----------|---------------|-------------------|-------------------------|
-| verbatim | — | **high** | CRITICAL | MAJOR |
-| detailed | — | **high** | CRITICAL | MAJOR |
-| — | critical | **high** | CRITICAL | MAJOR |
+| verbatim | — | **high (TIER 1a)** | CRITICAL | MAJOR (completeness check) |
+| detailed | — | **high (TIER 1a)** | CRITICAL | MAJOR (completeness check) |
+| — | critical | **high (TIER 1b)** | CRITICAL | MAJOR |
 | focused | — | **medium** | MAJOR | MINOR |
 | — | important | **medium** | MAJOR | MINOR |
 | relevant | — | **low** | MINOR | MINOR |
 | — | helpful | **low** | MINOR | MINOR |
 
-**Merging rule**: When a chunk has both retention and importance attributes, use the **higher priority level** for verification.
+**Merging rule**: When a chunk has both retention and importance attributes, use the **higher priority level** for verification (TIER 1a > TIER 1b > TIER 2 > TIER 3).
 
 **Important principle**: Every chunk must be able to generate at least a MINOR issue. This ensures no chunk is effectively ignored during verification.
 
-**Note**: verbatim and detailed are treated identically for AI verification. Word-for-word matching is handled by code post-processing.
+**Key differences between TIER 1a and TIER 1b:**
+- **TIER 1a (verbatim/detailed)**: Core facts + Completeness check against source text. Student can achieve 100% by copying original text.
+- **TIER 1b (critical)**: Core facts + Minor details (at least one). More flexible compression allowed.
 
 ---
 
@@ -62,12 +64,34 @@ Both retention levels (for user-focused chunks) and importance levels (for book-
 Analyze each marked `<chunk>` and assign it to one of THREE tiers based on its attributes:
 
 ### TIER 1 (high priority): verbatim OR detailed OR critical
+
+**Two sub-types with different verification strategies:**
+
+#### TIER 1a: verbatim OR detailed chunks
+**Verification Condition:** "Core Facts + Completeness Check"
+- Must include ALL items from the **core facts list**
+- THEN compare with source text for information completeness
+
+**Issue reporting:**
+- **If completely missing:** CRITICAL issue
+- **If core facts incomplete:** CRITICAL issue
+- **If core facts satisfied but information incomplete compared to source:** MAJOR issue (guaranteed minimum)
+
+**Strategy:**
+- Extract the original chunk text from the markup (will be provided to reviewer)
+- **FIRST, detect if this chunk contains literary/metaphorical content** (see guidelines below)
+- Identify core facts (essential information, usually 2-5 items)
+- Add completeness check instruction: reviewer must compare compressed text with source text
+- The student CAN achieve 100% satisfaction by copying the original text (at the cost of compression ratio)
+
+#### TIER 1b: critical importance chunks
 **Verification Condition:** "Core + Minor"
 - Must include ALL items from the **core facts list**
 - PLUS at least ONE item from the **minor details list**
 
-**If completely missing:** CRITICAL issue
-**If mentioned but core incomplete or no minor details:** MAJOR issue
+**Issue reporting:**
+- **If completely missing:** CRITICAL issue
+- **If mentioned but core incomplete or no minor details:** MAJOR issue
 
 **Strategy:**
 - Extract the original chunk text from the markup
@@ -105,7 +129,7 @@ If the chunk contains ANY of these, mark it as **[LITERARY]** and follow special
    - Use quotation marks around key metaphorical terms to signal they must be preserved
    - Example: Core fact: "使用'掘墓人'或类似metaphorical language描述人物的历史角色"
 
-**Example (factual chunk):**
+**Example (TIER 1a - detailed/verbatim chunk, factual):**
 ```
 **地主拒绝帮助**
 
@@ -115,36 +139,62 @@ Source text:
 </source>
 
 Core facts (ALL required):
+- 主角父母死后
 - 主角去找地主求坟地
+- 主角提到父亲当了一辈子佃户
 - 地主拒绝了他
 
-Minor details (at least ONE required):
-- 主角提到父亲当了一辈子佃户
-- 地主的拒绝是"干净利落的"
-- 地主说了冷酷的话语
+Completeness check:
+- After verifying core facts, compare the compressed text with source text above
+- Check if any substantive information is missing, understated, or significantly altered
+- This is a "detailed" chunk - it should preserve ~100% information with rephrasing allowed
+- If information is incomplete → report MAJOR issue (guaranteed minimum even if core facts are satisfied)
+- The student can achieve 100% satisfaction by preserving the original text closely
 ```
 
-**Example (literary chunk):**
+**Example (TIER 1a - detailed/verbatim chunk, literary):**
 ```
 **命运的预示** [LITERARY]
 
 Source text:
 <source>
-历史为这个王朝准备了一个终结者：某人。当然他不会想到命运会交给他这样一个重要的任务。这一年，他十七岁。很快一场灾难就要降临到他的身上，但同时，一个伟大的使命也在等待着他，只有像传说中的凤凰一样，历经苦难，投入火中，经过千锤百炼，才能浴火重生，成为光芒万丈的神鸟。来吧，命运之子正在等待着你！
+历史为这个王朝准备了一个终结者：某人。当然他不会想到命运会交给他这样一个重要的任务。这一年，他十七岁。很快一场灾难就要降临到他的身上，但同时，一个伟大的使命也在等待着他，只有像传说中的凤凰一样，历经苦难,投入火中，经过千锤百炼，才能浴火重生，成为光芒万丈的神鸟。来吧，命运之子正在等待着你！
 </source>
 
 Core facts (ALL required):
 - 使用metaphorical/prophetic language描述主角被命运选中(如"历史准备的终结者"、"命运之子"等)
 - 这一年主角十七岁
 - Foreshadowing双重命运：一场灾难即将降临 + 一个伟大的使命在等待
+- 使用"凤凰"/"浴火重生"等metaphorical imagery描述转变历程
+
+Completeness check:
+- After verifying core facts, compare with source text for metaphorical/prophetic language preservation
+- Check: Are metaphors like "千锤百炼"、"光芒万丈的神鸟"、"来吧，命运之子" preserved?
+- This is a literary chunk - factual substitutions are NOT sufficient
+- The prophetic tone and dramatic expressions should be largely preserved
+- If tone/metaphors are significantly weakened → report MAJOR issue
+
+Note: This is a literary/prophetic chunk requiring high preservation of style and metaphorical language.
+```
+
+**Example (TIER 1b - critical importance chunk):**
+```
+**主角决定参军**
+
+Source text:
+<source>
+面对师兄的告发和朝廷的追捕，主角算了一卦，得到"逃跑必死，起义有生机"的启示。他意识到别无选择，只能参加起义军。
+</source>
+
+Core facts (ALL required):
+- 师兄告发了主角
+- 主角算卦得到启示
+- 主角决定参加起义军
 
 Minor details (at least ONE required):
-- 使用"凤凰"/"浴火重生"等metaphorical imagery描述他的转变历程
-- 提到"千锤百炼"或类似dramatic expressions
-- "光芒万丈的神鸟"或类似prophetic descriptions of future greatness
-- 直接呼告"来吧，命运之子"的dramatic address
-
-Note: This is a literary/prophetic chunk. Factual substitutions like "某年某人出生" or "他经历了很多苦难" are NOT sufficient. The prophetic tone and metaphorical framing must be preserved.
+- 卦象内容是"逃跑必死，起义有生机"
+- 主角意识到别无选择
+- 朝廷在追捕主角
 ```
 
 ---
@@ -205,6 +255,35 @@ Structure your output EXACTLY as follows:
 ---
 
 ### TIER 1 (HIGH PRIORITY - CRITICAL if missing, MAJOR if incomplete)
+
+**For verbatim/detailed chunks:**
+
+**【Chunk label】** [Add [LITERARY] tag if this chunk contains metaphorical/prophetic language]
+
+Source text:
+<source>
+【Original chunk text extracted from markup】
+</source>
+
+Core facts (ALL required):
+- 【Core fact 1 - if literary chunk, include metaphorical expressions with quotes】
+- 【Core fact 2 - preserve tone/style requirements】
+- 【Core fact 3】
+- 【...】
+
+Completeness check:
+- After verifying core facts, compare the compressed text with source text above
+- Check if any substantive information is missing, understated, or significantly altered
+- This is a "detailed"/"verbatim" chunk - it should preserve ~100% information with rephrasing allowed
+- If information is incomplete → report MAJOR issue (guaranteed minimum even if core facts are satisfied)
+- The student can achieve 100% satisfaction by preserving the original text closely
+
+[If literary chunk, add a note:]
+Note: This is a literary/[metaphorical/prophetic/symbolic] chunk requiring high preservation of style and [metaphorical/prophetic/symbolic] language.
+
+---
+
+**For critical importance chunks:**
 
 **【Chunk label】** [Add [LITERARY] tag if this chunk contains metaphorical/prophetic language]
 
@@ -274,38 +353,46 @@ Identify potential narrative gaps or logical jumps between chunks that could con
 1. **Clue naming:** Name based on what the chunks actually discuss (clue's real content), not user's general intent
 
 2. **Tier assignment logic:**
-   - retention = verbatim OR detailed → TIER 1
+   - retention = verbatim OR detailed → TIER 1a (with completeness check)
+   - importance = critical → TIER 1b (with core + minor)
    - retention = focused → TIER 2
    - retention = relevant → TIER 3
+   - When a chunk has BOTH retention and importance: use the higher priority tier (1a > 1b > 2 > 3)
 
 3. **Source text extraction:**
-   - For TIER 1: Extract original text from `<chunk>` tags and place in `<source>` tags
+   - For TIER 1 (all subtypes): Always extract original text from `<chunk>` tags and place in `<source>` tags
    - For TIER 2-3: No need to quote full text (saves space)
 
-4. **Core vs Minor distinction (TIER 1 only):**
+4. **TIER 1a verification (verbatim/detailed chunks):**
+   - Core facts: Absolutely essential information (usually 2-5 items)
+   - NO minor details list - use completeness check instead
+   - Completeness check gives reviewer flexibility to judge "all information" against source text
+   - Student can achieve 100% satisfaction by closely preserving original text
+
+5. **TIER 1b verification (critical importance chunks):**
    - Core facts: Absolutely essential information (usually 2-4 items)
    - Minor details: Supporting details that add richness (usually 2-5 items, only need 1)
    - If a chunk is very simple, you can have 1-2 core facts and 1-2 minor details
 
-5. **Key points quantity (TIER 2):**
+6. **Key points quantity (TIER 2):**
    - List 2-5 key points
    - Reviewer only needs to find ONE to pass
    - More options = more flexibility for compression
 
-6. **Only use information explicitly stated in the source text** - do not add facts from general knowledge
+7. **Only use information explicitly stated in the source text** - do not add facts from general knowledge
 
-7. **Generate abstract requirements, not specific phrasings** (for TIER 2):
+8. **Generate abstract requirements, not specific phrasings** (for TIER 2):
    - ✅ GOOD: "Multiple family members died in rapid succession"
    - ❌ BAD: "On June 6th father died, June 9th brother died..." (too specific)
 
-8. **Context awareness:**
+9. **Context awareness:**
    - Unmarked text between chunks provides narrative context
    - Use surrounding text to better understand chunk meaning
    - This complete context helps you generate more accurate verification strategies
 
-9. **Every chunk MUST appear in exactly ONE tier** - no chunk should be skipped
+10. **Every chunk MUST appear in exactly ONE tier** - no chunk should be skipped
 
-10. **Narrative Coherence (for importance chunks only)**:
+11. **Narrative Coherence (for importance chunks only)**:
    - Check if this clue contains chunks with importance attributes (critical/important/helpful)
    - If yes, analyze the logical flow between these chunks in the original text
    - Identify potential narrative gaps:
