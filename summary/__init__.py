@@ -5,4 +5,8 @@ This __init__.py file makes 'src' a Python package.
 If you rename the 'src' directory, remember to update .github/workflows/check-pr.yml
 """
 
+from .summation import summary
+
 __version__ = "0.1.0"
+
+__all__ = ["summary"]

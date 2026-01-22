@@ -1,6 +1,5 @@
 """Topologization pipeline: incremental knowledge graph building and snake detection."""
 
-import shutil
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -25,6 +24,9 @@ from .text_fragmenter import TextFragmenter
 from .wave_reflection import WaveReflection
 from .working_memory import WorkingMemory
 
+_GENERATION_DECAY_FACTOR = 0.5
+_MIN_SNAKE_SIZE = 2
+
 
 class ReadonlyTopologization:
     """Read-only access to topologization workspace.
@@ -39,13 +41,26 @@ class ReadonlyTopologization:
         Args:
             workspace_path: Path to workspace directory containing fragments/ and database.db
         """
+        # Validate workspace exists
+        if not workspace_path.exists():
+            raise FileNotFoundError(f"Workspace not found: {workspace_path}")
+
+        db_path = workspace_path / "database.db"
+        if not db_path.exists():
+            raise FileNotFoundError(f"Database not found: {db_path}")
+
+        # Setup connection and readers
+        self._setup_connection(workspace_path, db_path)
+
+    def _setup_connection(self, workspace_path: Path, db_path: Path):
+        """Setup database connection and initialize readers.
+
+        Args:
+            workspace_path: Path to workspace directory
+            db_path: Path to database file
+        """
         self.workspace_path = workspace_path
-        self._db_path = workspace_path / "database.db"
-
-        # Initialize database connection
-        if not self._db_path.exists():
-            raise FileNotFoundError(f"Database not found: {self._db_path}")
-
+        self._db_path = db_path
         self._conn = sqlite3.connect(self._db_path)
 
         # Initialize fragment reader
@@ -201,21 +216,17 @@ class Topologization(ReadonlyTopologization):
 
     def __init__(
         self,
-        intention: str,
         workspace_path: Path,
         llm: LLM,
         encoding: Encoding,
         max_fragment_tokens: int = 800,
         working_memory_capacity: int = 7,
-        generation_decay_factor: float = 0.5,
-        min_cluster_size: int = 2,
         snake_tokens: int = 700,
         group_tokens_count: int = 9600,
     ):
-        """Create new Topologization workspace for incremental chapter loading.
+        """Create or continue Topologization workspace for incremental chapter loading.
 
         Args:
-            intention: User's reading intention/goal
             workspace_path: Directory to store fragments + database
             llm: LLM instance for extraction
             encoding: Token encoding
@@ -232,61 +243,66 @@ class Topologization(ReadonlyTopologization):
         print(f"Workspace: {workspace_path}")
         print(f"Working memory capacity: {working_memory_capacity}\n")
 
+        # Setup workspace: create if database doesn't exist, continue if it does
+        db_path = workspace_path / "database.db"
+
+        if not db_path.exists():
+            # Create new workspace
+            print("Creating new workspace...")
+            workspace_path.mkdir(parents=True, exist_ok=True)
+            (workspace_path / "fragments").mkdir(exist_ok=True)
+
+            # Initialize database
+            conn = database.initialize_database(db_path)
+            conn.close()
+        else:
+            # Continue from existing workspace
+            print("Continuing from existing workspace...")
+
+        # Call parent to setup connection and readers
+        super().__init__(workspace_path)
+
         # Save build parameters
-        self._intention = intention
         self._llm = llm
         self._encoding = encoding
         self._max_fragment_tokens = max_fragment_tokens
         self._working_memory_capacity = working_memory_capacity
-        self._generation_decay_factor = generation_decay_factor
-        self._min_cluster_size = min_cluster_size
         self._snake_tokens = snake_tokens
         self._group_tokens_count = group_tokens_count
 
-        # State variables for building
-        self._next_chapter_id = 0
-        self._next_chunk_id = 0  # Global chunk ID counter
-        self._extraction_guidance: str | None = None  # Lazy-loaded on first load()
-        self._fragment_writer: FragmentWriter
-        self._knowledge_graph_nx: nx.DiGraph
-        self._all_chunks: list[CognitiveChunk] = []
+        # Calculate next IDs from database
+        cursor = self._conn.execute("SELECT MAX(chapter_id) FROM fragment_groups")
+        row = cursor.fetchone()
+        max_chapter_id = row[0] if row else None
+        self._next_chapter_id = (max_chapter_id + 1) if max_chapter_id is not None else 0
 
-        # Setup workspace
-        self.workspace_path = workspace_path
-        if workspace_path.exists():
-            shutil.rmtree(workspace_path)
-        workspace_path.mkdir(parents=True)
-        (workspace_path / "fragments").mkdir()
+        cursor = self._conn.execute("SELECT MAX(id) FROM chunks")
+        row = cursor.fetchone()
+        max_chunk_id = row[0] if row else None
+        self._next_chunk_id = (max_chunk_id + 1) if max_chunk_id is not None else 0
 
-        # Initialize database
-        self._db_path = workspace_path / "database.db"
-        self._conn = database.initialize_database(self._db_path)
+        print(f"Next chapter ID: {self._next_chapter_id}")
+        print(f"Next chunk ID: {self._next_chunk_id}\n")
 
-        # Create persistent components for building
-        self._fragment_writer = FragmentWriter(workspace_path)
-        self._knowledge_graph_nx = nx.DiGraph()
+        # Extraction guidance cache (for intention changes)
+        self._extraction_guidance: str | None = None
+        self._last_intention: str | None = None
 
-        # Initialize fragment reader
-        self._fragment_reader = FragmentReader(workspace_path)
-
-        # Create knowledge graph accessor (lazy-loading from database)
-        from .api import KnowledgeGraph
-
-        self.knowledge_graph = KnowledgeGraph(self._conn, self)
-
-    def load(self, sentences: Iterable[tuple[int, str]]) -> int:
+    def load(self, sentences: Iterable[tuple[int, str]], intention: str) -> int:
         """Load one chapter and return its chapter_id.
 
         Args:
             sentences: Iterable of (token_count, sentence_text) for this chapter
+            intention: User's reading intention/goal for extraction guidance
 
         Returns:
             Chapter ID (auto-incremented)
         """
-        # Lazy load meta-prompt on first call
-        if self._extraction_guidance is None:
+        # Check if intention changed, regenerate guidance if needed
+        if self._extraction_guidance is None or self._last_intention != intention:
             print("\n=== Meta-Prompt: Generating Extraction Guidance ===")
-            self._extraction_guidance = _generate_extraction_guidance(self._intention, self._llm)
+            self._extraction_guidance = _generate_extraction_guidance(intention, self._llm)
+            self._last_intention = intention
 
         # Get chapter ID and increment
         chapter_id = self._next_chapter_id
@@ -296,17 +312,23 @@ class Topologization(ReadonlyTopologization):
         print(f"=== Loading Chapter {chapter_id} ===")
         print(f"{'=' * 60}")
 
+        # Initialize fragment writer for this load session
+        fragment_writer = FragmentWriter(self.workspace_path)
+
+        # Load knowledge graph from database
+        knowledge_graph_nx = _load_graph_from_database(self._conn)
+
         # Reset working memory (per-chapter independence)
         working_memory = WorkingMemory(capacity=self._working_memory_capacity)
         working_memory._next_id = self._next_chunk_id  # Set starting chunk ID
         # Note: generation resets to 0 automatically in new WorkingMemory
 
         # Create components for this chapter
-        wave_reflection = WaveReflection(generation_decay_factor=self._generation_decay_factor)
+        wave_reflection = WaveReflection(generation_decay_factor=_GENERATION_DECAY_FACTOR)
         extractor = ChunkExtractor(self._llm, self._extraction_guidance)
 
         # Start this chapter in fragment writer
-        self._fragment_writer.start_chapter(chapter_id)
+        fragment_writer.start_chapter(chapter_id)
 
         # Extract knowledge graph for this chapter
         chapter_chunks = self._extract_chapter_knowledge_graph(
@@ -315,17 +337,16 @@ class Topologization(ReadonlyTopologization):
             extractor=extractor,
             working_memory=working_memory,
             wave_reflection=wave_reflection,
+            fragment_writer=fragment_writer,
+            knowledge_graph_nx=knowledge_graph_nx,
         )
 
         # Update next_chunk_id for next chapter
         self._next_chunk_id = working_memory._next_id
 
-        # Accumulate chunks and graph
-        self._all_chunks.extend(chapter_chunks)
-
         # Save chunks and edges to database
         print(f"\nSaving chapter {chapter_id} to database...")
-        _save_knowledge_graph(self._conn, self._knowledge_graph_nx, chapter_chunks)
+        _save_knowledge_graph(self._conn, knowledge_graph_nx, chapter_chunks)
 
         # Fragment grouping (only this chapter)
         print(f"\n{'=' * 60}")
@@ -352,15 +373,15 @@ class Topologization(ReadonlyTopologization):
         # Create config object for snake analysis
         group_snakes = _analyze_snakes_by_groups(
             self._conn,
-            self._knowledge_graph_nx,
+            knowledge_graph_nx,
             chapter_groups,
-            min_cluster_size=self._min_cluster_size,
+            min_cluster_size=_MIN_SNAKE_SIZE,
             snake_tokens=self._snake_tokens,
         )
 
         # Save snakes to database
         print("\nSaving snakes to database...")
-        _save_snakes_by_groups(self._conn, group_snakes, self._knowledge_graph_nx)
+        _save_snakes_by_groups(self._conn, group_snakes, knowledge_graph_nx)
 
         # Print chapter summary
         total_snakes = sum(len(snakes_list) for snakes_list, _ in group_snakes.values())
@@ -379,6 +400,8 @@ class Topologization(ReadonlyTopologization):
         extractor: ChunkExtractor,
         working_memory: WorkingMemory,
         wave_reflection: WaveReflection,
+        fragment_writer: FragmentWriter,
+        knowledge_graph_nx: nx.DiGraph,
     ) -> list[CognitiveChunk]:
         """Extract knowledge graph for a single chapter.
 
@@ -388,12 +411,14 @@ class Topologization(ReadonlyTopologization):
             extractor: Chunk extractor
             working_memory: Working memory (fresh for this chapter)
             wave_reflection: Wave reflection algorithm
+            fragment_writer: Fragment writer for this session
+            knowledge_graph_nx: Knowledge graph (loaded from database)
 
         Returns:
             List of all chunks extracted from this chapter
         """
         # Create fragmenter for this chapter (wraps single chapter as iterable)
-        fragmenter = TextFragmenter(self._fragment_writer, self._encoding, self._max_fragment_tokens)
+        fragmenter = TextFragmenter(fragment_writer, self._encoding, self._max_fragment_tokens)
 
         chapter_chunks: list[CognitiveChunk] = []
         fragment_count = 0
@@ -419,14 +444,14 @@ class Topologization(ReadonlyTopologization):
 
             # Store fragment summary
             if fragment_summary:
-                self._fragment_writer.set_summary(fragment_summary)
+                fragment_writer.set_summary(fragment_summary)
 
             # Add user-focused chunks to working memory and assign IDs
             user_focused_chunks, user_focused_edges = working_memory.add_chunks_with_links(user_focused_result)
 
             # Add user-focused chunks to knowledge graph
             for chunk in user_focused_chunks:
-                self._knowledge_graph_nx.add_node(
+                knowledge_graph_nx.add_node(
                     chunk.id,
                     generation=chunk.generation,
                     sentence_id=chunk.sentence_id,
@@ -442,7 +467,7 @@ class Topologization(ReadonlyTopologization):
                 strength = _find_edge_strength(
                     user_focused_result.links, from_id, to_id, user_focused_chunks, user_focused_result.temp_ids
                 )
-                self._knowledge_graph_nx.add_edge(from_id, to_id, strength=strength)
+                knowledge_graph_nx.add_edge(from_id, to_id, strength=strength)
 
             chapter_chunks.extend(user_focused_chunks)
 
@@ -476,7 +501,7 @@ class Topologization(ReadonlyTopologization):
 
                 # Add book-coherence chunks to knowledge graph
                 for chunk in book_coherence_chunks:
-                    self._knowledge_graph_nx.add_node(
+                    knowledge_graph_nx.add_node(
                         chunk.id,
                         generation=chunk.generation,
                         sentence_id=chunk.sentence_id,
@@ -496,7 +521,7 @@ class Topologization(ReadonlyTopologization):
                         book_coherence_chunks,
                         book_coherence_result.temp_ids,
                     )
-                    self._knowledge_graph_nx.add_edge(from_id, to_id, strength=strength)
+                    knowledge_graph_nx.add_edge(from_id, to_id, strength=strength)
 
                 chapter_chunks.extend(book_coherence_chunks)
 
@@ -508,7 +533,7 @@ class Topologization(ReadonlyTopologization):
             # Note: Only select from chunks within this chapter (chapter independence)
             extra_chunks = wave_reflection.select_top_chunks(
                 all_chunks=chapter_chunks,  # Only this chapter's chunks
-                knowledge_graph=self._knowledge_graph_nx,
+                knowledge_graph=knowledge_graph_nx,
                 latest_chunk_ids=current_fragment_chunk_ids,
                 capacity=working_memory.capacity,
             )
@@ -522,7 +547,7 @@ class Topologization(ReadonlyTopologization):
 
         # Compute and add weights to knowledge graph for this chapter's chunks
         print(f"\nComputing node and edge weights for chapter {chapter_id}...")
-        add_weights_to_graph(self._knowledge_graph_nx)
+        add_weights_to_graph(knowledge_graph_nx)
 
         print(f"\nChapter {chapter_id} extraction complete:")
         print(f"  Chunks: {len(chapter_chunks)}")
@@ -532,6 +557,43 @@ class Topologization(ReadonlyTopologization):
 
 
 # ===== Internal helper functions =====
+
+
+def _load_graph_from_database(conn: sqlite3.Connection) -> nx.DiGraph:
+    """Load knowledge graph from database.
+
+    Args:
+        conn: SQLite database connection
+
+    Returns:
+        NetworkX directed graph with all nodes and edges
+    """
+    graph = nx.DiGraph()
+
+    # Load all nodes
+    cursor = conn.execute(
+        "SELECT id, generation, chapter_id, fragment_id, sentence_index, "
+        "label, content, retention, importance, tokens, weight FROM chunks"
+    )
+    for row in cursor:
+        graph.add_node(
+            row[0],  # id
+            generation=row[1],
+            sentence_id=(row[2], row[3], row[4]),  # (chapter_id, fragment_id, sentence_index)
+            label=row[5],
+            content=row[6],
+            retention=row[7],
+            importance=row[8],
+            tokens=row[9],
+            weight=row[10],
+        )
+
+    # Load all edges
+    cursor = conn.execute("SELECT from_id, to_id, strength, weight FROM knowledge_edges")
+    for row in cursor:
+        graph.add_edge(row[0], row[1], strength=row[2], weight=row[3])
+
+    return graph
 
 
 def _generate_extraction_guidance(

@@ -26,35 +26,51 @@ class LLM:
 
     def __init__(
         self,
-        config_path: Path,
+        api_key: str,
+        base_url: str,
+        model: str,
         data_dir_path: Path,
         log_dir_path: Path | None = None,
         cache_dir_path: Path | None = None,
+        timeout: float = 360.0,
+        temperature: float = 0.6,
+        top_p: float = 0.6,
         retry_times: int = 5,
         retry_interval_seconds: float = 6.0,
     ):
         """Initialize the LLM client.
 
         Args:
-            config_path: Path to the configuration JSON file
+            api_key: OpenAI API key
+            base_url: OpenAI API base URL
+            model: Model name (e.g., "gpt-4")
             data_dir_path: Path to the data directory containing Jinja templates
             log_dir_path: Directory path for saving logs
             cache_dir_path: Directory path for caching responses
+            timeout: Request timeout in seconds (default: 360.0)
+            temperature: Sampling temperature (default: 0.6)
+            top_p: Nucleus sampling parameter (default: 0.6)
             retry_times: Number of retry attempts on failure
             retry_interval_seconds: Wait time between retries
         """
-        # Load configuration
-        with open(config_path, encoding="utf-8") as f:
-            self.config = json.load(f)
+        # Store configuration
+        self.config = {
+            "key": api_key,
+            "url": base_url,
+            "model": model,
+            "timeout": timeout,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
 
         self.client = OpenAI(
-            api_key=self.config["key"],
-            base_url=self.config["url"],
-            timeout=self.config.get("timeout", 360.0),
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
         )
-        self.model = self.config["model"]
-        self.temperature = self.config.get("temperature", 0.6)
-        self.top_p = self.config.get("top_p", 0.6)
+        self.model = model
+        self.temperature = temperature
+        self.top_p = top_p
         self.retry_times = retry_times
         self.retry_interval_seconds = retry_interval_seconds
 
