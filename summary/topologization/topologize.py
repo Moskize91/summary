@@ -1,5 +1,6 @@
 """Topologization pipeline: incremental knowledge graph building and snake detection."""
 
+import asyncio
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -284,6 +285,10 @@ class Topologization(ReadonlyTopologization):
         print(f"Next chapter ID: {self._next_chapter_id}")
         print(f"Next chunk ID: {self._next_chunk_id}\n")
 
+        # Locks for concurrent access protection
+        self._id_lock = asyncio.Lock()  # Protect ID allocation (_next_chapter_id, _next_chunk_id)
+        self._guidance_lock = asyncio.Lock()  # Protect guidance generation
+
         # Extraction guidance cache (for intention changes)
         self._extraction_guidance: str | None = None
         self._last_intention: str | None = None
@@ -298,15 +303,18 @@ class Topologization(ReadonlyTopologization):
         Returns:
             Chapter ID (auto-incremented)
         """
-        # Check if intention changed, regenerate guidance if needed
-        if self._extraction_guidance is None or self._last_intention != intention:
-            print("\n=== Meta-Prompt: Generating Extraction Guidance ===")
-            self._extraction_guidance = await _generate_extraction_guidance(intention, self._llm)
-            self._last_intention = intention
+        # Check if intention changed, regenerate guidance if needed (with lock)
+        async with self._guidance_lock:
+            if self._extraction_guidance is None or self._last_intention != intention:
+                print("\n=== Meta-Prompt: Generating Extraction Guidance ===")
+                self._extraction_guidance = await _generate_extraction_guidance(intention, self._llm)
+                self._last_intention = intention
 
-        # Get chapter ID and increment
-        chapter_id = self._next_chapter_id
-        self._next_chapter_id += 1
+        # Allocate chapter ID and starting chunk ID (protected by lock)
+        async with self._id_lock:
+            chapter_id = self._next_chapter_id
+            self._next_chapter_id += 1
+            starting_chunk_id = self._next_chunk_id
 
         print(f"\n{'=' * 60}")
         print(f"=== Loading Chapter {chapter_id} ===")
@@ -320,7 +328,7 @@ class Topologization(ReadonlyTopologization):
 
         # Reset working memory (per-chapter independence)
         working_memory = WorkingMemory(capacity=self._working_memory_capacity)
-        working_memory._next_id = self._next_chunk_id  # Set starting chunk ID
+        working_memory._next_id = starting_chunk_id  # Set starting chunk ID
         # Note: generation resets to 0 automatically in new WorkingMemory
 
         # Create components for this chapter
@@ -341,8 +349,9 @@ class Topologization(ReadonlyTopologization):
             knowledge_graph_nx=knowledge_graph_nx,
         )
 
-        # Update next_chunk_id for next chapter
-        self._next_chunk_id = working_memory._next_id
+        # Update next_chunk_id for next chapter (protected by lock)
+        async with self._id_lock:
+            self._next_chunk_id = working_memory._next_id
 
         # Save chunks and edges to database
         print(f"\nSaving chapter {chapter_id} to database...")

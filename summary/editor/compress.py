@@ -1,5 +1,6 @@
 """Text compression with multi-reviewer iterative refinement."""
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -217,7 +218,6 @@ async def compress_text(
     topologization: Topologization,
     chapter_id: int,
     group_id: int,
-    intention: str,
     llm: LLM,
     compression_ratio: float = 0.2,
     max_iterations: int = 5,
@@ -230,7 +230,6 @@ async def compress_text(
         topologization: Topologization object with knowledge graph and snakes
         chapter_id: Chapter ID to compress
         group_id: Group ID within the chapter to compress
-        intention: User's reading intention
         llm: LLM instance
         compression_ratio: Target compression ratio (default: 0.2 = 20%)
         max_iterations: Number of iterations (default: 5)
@@ -245,12 +244,16 @@ async def compress_text(
     print(f"=== Chapter {chapter_id}, Group {group_id} ===")
     print("=" * 60)
 
-    # Setup logging
+    # Setup logging (Topologization handles locking internally)
     log_file = None
     if log_dir_path is not None:
         log_dir_path.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
         log_file = log_dir_path / f"compression chapter-{chapter_id} group-{group_id} {timestamp}.log"
+
+        # Get hierarchy (Topologization handles locking internally)
+        hierarchy = _format_chunk_hierarchy(topologization, chapter_id, group_id)
+
         with open(log_file, "w", encoding="utf-8") as f:
             f.write("=== Text Compression Log ===\n")
             f.write(f"Chapter: {chapter_id}, Group: {group_id}\n")
@@ -258,18 +261,15 @@ async def compress_text(
             f.write(f"Compression ratio target: {compression_ratio:.0%}\n")
             f.write(f"Max iterations: {max_iterations}\n")
             f.write("\n\n")
-
-            # Write chunk hierarchy
-            hierarchy = _format_chunk_hierarchy(topologization, chapter_id, group_id)
             f.write(hierarchy)
             f.write("\n")
 
-    # Step 1: Get original text for this group
+    # Step 1: Get original text for this group (Topologization handles locking internally)
     print("\nStep 1: Loading original text...")
     original_text = _get_full_text(topologization, chapter_id, group_id)
     print(f"Original text length: {len(original_text)} characters")
 
-    # Step 2: Extract clues from this group's snakes
+    # Step 2: Extract clues from this group's snakes (Topologization handles locking internally)
     print("\nStep 2: Extracting clues from topologization...")
     clues = extract_clues_from_topologization(
         topologization, max_clues=max_clues, chapter_id=chapter_id, group_id=group_id
@@ -535,12 +535,11 @@ async def _generate_clue_reviewers(
     Returns:
         List of ClueReviewerInfo objects
     """
-    clue_reviewers = []
-
     # Find prompt template
     info_prompt_path = Path(__file__).parent.parent / "data" / "editor" / "clue_reviewer_generator.jinja"
 
-    for clue in clues:
+    async def generate_single_reviewer(clue: Clue) -> ClueReviewerInfo:
+        """Generate reviewer info for a single clue."""
         print(f"  Processing clue {clue.clue_id}: {clue.label}")
         print(f"    Weight: {clue.weight:.2f}")
         if clue.is_merged:
@@ -565,20 +564,21 @@ async def _generate_clue_reviewers(
         reviewer_info = info_response.strip()
         print(f"    Reviewer strategy generated ({len(reviewer_info)} chars)")
 
-        clue_reviewers.append(
-            ClueReviewerInfo(
-                clue_id=clue.clue_id,
-                weight=clue.weight,
-                label=clue.label,
-                reviewer_info=reviewer_info,
-            )
+        return ClueReviewerInfo(
+            clue_id=clue.clue_id,
+            weight=clue.weight,
+            label=clue.label,
+            reviewer_info=reviewer_info,
         )
+
+    # Generate all reviewers concurrently
+    clue_reviewers = await asyncio.gather(*[generate_single_reviewer(clue) for clue in clues])
 
     print("\n  Clue weights (already normalized, sum = 1.0):")
     for cr in clue_reviewers:
         print(f"    Clue {cr.clue_id}: {cr.weight:.3f}")
 
-    return clue_reviewers
+    return list(clue_reviewers)
 
 
 async def _compress_iteration(
@@ -679,11 +679,10 @@ async def _review_compression(
         - reviews: List of ReviewResult objects
         - raw_responses: Dict mapping clue_id to raw response text
     """
-    reviews = []
-    raw_responses = {}
     prompt_path = Path(__file__).parent.parent / "data" / "editor" / "clue_reviewer.jinja"
 
-    for cr in clue_reviewers:
+    async def review_single_clue(cr: ClueReviewerInfo) -> tuple[ReviewResult, str]:
+        """Review compressed text with a single clue reviewer."""
         system_prompt = llm.load_system_prompt(
             prompt_path,
             thread_info=cr.reviewer_info,
@@ -715,9 +714,6 @@ async def _review_compression(
         if not response:
             raise RuntimeError(f"Clue {cr.clue_id} review failed: LLM returned empty response")
 
-        # Store raw response
-        raw_responses[cr.clue_id] = response
-
         try:
             review_json = _extract_json_from_markdown(response)
             review_data = json.loads(repair_json(review_json))
@@ -726,16 +722,22 @@ async def _review_compression(
 
         try:
             issues = review_data.get("issues", [])
-            reviews.append(
-                ReviewResult(
-                    clue_id=cr.clue_id,
-                    weight=cr.weight,
-                    issues=issues,
-                )
+            review_result = ReviewResult(
+                clue_id=cr.clue_id,
+                weight=cr.weight,
+                issues=issues,
             )
             print(f"  Clue {cr.clue_id}: {len(issues)} issues")
+            return review_result, response
         except (ValueError, KeyError) as e:
             raise RuntimeError(f"Clue {cr.clue_id} review failed: Invalid data format - {e}") from e
+
+    # Review with all reviewers concurrently
+    results = await asyncio.gather(*[review_single_clue(cr) for cr in clue_reviewers])
+
+    # Unpack results
+    reviews = [result[0] for result in results]
+    raw_responses = {result[0].clue_id: result[1] for result in results}
 
     return reviews, raw_responses
 

@@ -1,5 +1,6 @@
 """High-level API for text summarization pipeline."""
 
+import asyncio
 from os import PathLike
 from pathlib import Path
 
@@ -21,6 +22,8 @@ async def summary(
     workspace_path: PathLike | str | None = None,
     log_dir: PathLike | str | None = None,
     cache_dir: PathLike | str | None = None,
+    chapter_concurrent: int = 1,
+    llm_concurrent: int = 1,
     llm_timeout: float = 360.0,
     llm_temperature: float = 0.6,
     llm_top_p: float = 0.6,
@@ -80,12 +83,12 @@ async def summary(
         model=llm_model,
         data_dir_path=data_dir,
         log_dir_path=log_dir / "llm",
+        concurrent=llm_concurrent,
         cache_dir_path=Path(cache_dir) if cache_dir is not None else None,
         timeout=llm_timeout,
         temperature=llm_temperature,
         top_p=llm_top_p,
     )
-
     # Prepare encoding
     encoding = get_encoding("o200k_base")
     print(f"Processing input EPUB: {input_path}")
@@ -101,60 +104,53 @@ async def summary(
         group_tokens_count=group_tokens_count,
     )
 
-    # Read EPUB and incrementally load chapters
-    chapter_info = []  # List of (chapter_id, chapter_title)
+    # Create semaphore to limit chapter concurrency
+    chapter_semaphore = asyncio.Semaphore(chapter_concurrent)
 
-    for chapter_title, chapter_sentences in read_epub_sentences(input_path, encoding):
-        sentences_list = list(chapter_sentences)
-        print(f"  Loading: {chapter_title} ({len(sentences_list)} sentences)")
+    async def process_chapter(chapter_title: str, get_chapter_sentences) -> tuple[str, list[str]]:
+        """Load chapter, then compress all its groups."""
+        async with chapter_semaphore:
+            # Load chapter (call the factory to get the sentence generator)
+            sentences_list = list(get_chapter_sentences())
+            print(f"  Loading: {chapter_title} ({len(sentences_list)} sentences)")
+            chapter_id = await topologization.load(sentences_list, intention)
 
-        # Load chapter and get its ID
-        chapter_id = await topologization.load(sentences_list, intention)
-        chapter_info.append((chapter_id, chapter_title))
+            # Get group IDs and compress
+            group_ids = topologization.get_group_ids_for_chapter(chapter_id)
+            print(f"  Compressing {len(group_ids)} groups...")
 
-    print(f"Total chapters loaded: {len(chapter_info)}")
+            async def compress_group(group_id: int) -> str:
+                """Compress a single group."""
+                compressed_text = await compress_text(
+                    topologization=topologization,
+                    chapter_id=chapter_id,
+                    group_id=group_id,
+                    llm=llm,
+                    compression_ratio=compression_ratio,
+                    max_iterations=max_iterations,
+                    max_clues=max_clues,
+                    log_dir_path=log_dir / "compression",
+                )
+                return compressed_text
 
-    # Run compression for each chapter and group
-    print("\n" + "=" * 60)
-    print("=== Compression Stage ===")
-    print("=" * 60)
+            # Compress all groups concurrently (LLM will queue them)
+            chapter_compressed_texts = await asyncio.gather(*[compress_group(gid) for gid in group_ids])
 
-    print(f"\nFound {len(chapter_info)} chapters to compress")
+            # Merge all groups in this chapter with double newlines
+            full_chapter_text = "\n\n".join(chapter_compressed_texts)
+            print(f"  ✓ Chapter complete: {len(full_chapter_text)} characters")
+            return (chapter_title, [full_chapter_text])
 
-    # Collect compressed chapters for EPUB output
-    compressed_chapters = []
-
-    for chapter_id, chapter_title in chapter_info:
-        group_ids = topologization.get_group_ids_for_chapter(chapter_id)
-        print(f"\nChapter {chapter_id}: {chapter_title}")
-        print(f"  Groups: {len(group_ids)}")
-
-        # Compress all groups in this chapter
-        chapter_compressed_texts = []
-
-        for group_id in group_ids:
-            print(f"  Compressing Group {group_id}...")
-
-            # Compress this group
-            compressed_text = await compress_text(
-                topologization=topologization,
-                chapter_id=chapter_id,
-                group_id=group_id,
-                intention=intention,
-                llm=llm,
-                compression_ratio=compression_ratio,
-                max_iterations=max_iterations,
-                max_clues=max_clues,
-                log_dir_path=log_dir / "compression",
+    # Process all chapters (load + compress)
+    compressed_chapters = await asyncio.gather(
+        *[
+            process_chapter(
+                chapter_title=title,
+                get_chapter_sentences=getter,
             )
-
-            chapter_compressed_texts.append(compressed_text)
-            print(f"    ✓ Length: {len(compressed_text)} characters")
-
-        # Merge all groups in this chapter with double newlines
-        full_chapter_text = "\n\n".join(chapter_compressed_texts)
-        compressed_chapters.append((chapter_title, [full_chapter_text]))
-
+            for title, getter in read_epub_sentences(input_path, encoding)
+        ]
+    )
     # Write output EPUB
     print("\n" + "=" * 60)
     print("=== Writing Output EPUB ===")

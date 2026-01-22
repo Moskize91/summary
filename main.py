@@ -47,6 +47,8 @@ async def main():
         intention=intention,
         input_epub_file=input_file,
         output_epub_file=output_file,
+        llm_concurrent=12,
+        chapter_concurrent=6,
         llm_api_key=llm_config["key"],
         llm_base_url=llm_config["url"],
         llm_model=llm_config["model"],

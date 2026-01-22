@@ -1,7 +1,7 @@
 """EPUB reading utilities with sentence-level streaming."""
 
 import xml.etree.ElementTree as ET
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import ebooklib
@@ -117,12 +117,15 @@ def read_epub_sentences(
     epub_path: Path | str,
     encoding: Encoding,
     batch_size: int = 15000,
-) -> Generator[tuple[str, Generator[tuple[int, str], None, None]], None, None]:
-    """Read EPUB file and yield sentences chapter by chapter.
+) -> Generator[tuple[str, Callable[[], Generator[tuple[int, str], None, None]]], None, None]:
+    """Read EPUB file and yield chapter info with lazy sentence generators.
 
     This function returns a two-level generator structure:
-    - First level: yields (chapter_title, sentence_generator) tuples for each chapter
-    - Second level: yields (token_count, sentence_text) tuples for each sentence
+    - First level: yields (chapter_title, sentence_generator_factory) tuples for each chapter
+    - Second level: sentence_generator_factory() returns a generator that yields (token_count, sentence_text)
+
+    The sentence generator is lazy - it only reads and processes the chapter when called.
+    This avoids loading all chapters into memory at once.
 
     Args:
         epub_path: Path to EPUB file
@@ -130,13 +133,13 @@ def read_epub_sentences(
         batch_size: Characters to accumulate before processing with spaCy
 
     Yields:
-        Tuples of (chapter_title, sentence_generator) for each chapter
+        Tuples of (chapter_title, sentence_generator_factory) for each chapter
 
     Example:
         >>> encoding = get_encoding("o200k_base")
-        >>> for chapter_title, chapter_sentences in read_epub_sentences("book.epub", encoding):
+        >>> for chapter_title, get_sentences in read_epub_sentences("book.epub", encoding):
         ...     print(f"Chapter: {chapter_title}")
-        ...     for token_count, sentence in chapter_sentences:
+        ...     for token_count, sentence in get_sentences():  # Call to get the generator
         ...         print(f"{token_count} tokens: {sentence}")
     """
     # Load spaCy multilingual model with sentencizer
@@ -148,11 +151,13 @@ def read_epub_sentences(
 
     # Get chapters in spine order (reading order)
     for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
-        # Get chapter HTML content
-        html_content = item.get_content()
+        # Use item name as title (avoid loading HTML content until needed)
+        chapter_title = item.get_name()
 
-        # Extract chapter title
-        chapter_title = _extract_chapter_title(html_content, item.get_name())
+        # Create a callable that loads HTML and returns the sentence generator when called
+        def get_sentences(epub_item=item, nlp_model=nlp, enc=encoding, bs=batch_size):
+            html_bytes = epub_item.get_content()  # Load HTML only when called!
+            return _process_chapter_to_sentences(html_bytes, nlp_model, enc, bs)
 
-        # Yield (title, sentence_generator) tuple
-        yield (chapter_title, _process_chapter_to_sentences(html_content, nlp, encoding, batch_size))
+        # Yield (title, sentence_generator_factory) tuple
+        yield (chapter_title, get_sentences)

@@ -40,6 +40,7 @@ class LLM:
         data_dir_path: Path,
         log_dir_path: Path | None = None,
         cache_dir_path: Path | None = None,
+        concurrent: int = 1,
         timeout: float = 360.0,
         temperature: float = 0.6,
         top_p: float = 0.6,
@@ -81,6 +82,9 @@ class LLM:
         self.top_p = top_p
         self.retry_times = retry_times
         self.retry_interval_seconds = retry_interval_seconds
+
+        # Setup concurrency control
+        self._semaphore = asyncio.Semaphore(concurrent)
 
         # Setup Jinja environment
         self._data_dir_path = data_dir_path.resolve()
@@ -185,12 +189,16 @@ class LLM:
                 try:
                     # Convert LLMessage objects to dict format for OpenAI API
                     messages_dict = [{"role": msg.role, "content": msg.content} for msg in messages]
-                    completion = await self.client.chat.completions.create(
-                        model=self.model,
-                        messages=cast(list[ChatCompletionMessageParam], messages_dict),
-                        temperature=temperature,
-                        top_p=top_p,
-                    )
+
+                    # Use semaphore to limit concurrent API calls
+                    async with self._semaphore:
+                        completion = await self.client.chat.completions.create(
+                            model=self.model,
+                            messages=cast(list[ChatCompletionMessageParam], messages_dict),
+                            temperature=temperature,
+                            top_p=top_p,
+                        )
+
                     response = completion.choices[0].message.content or ""
 
                     if logger is not None:
