@@ -5,7 +5,7 @@ from pathlib import Path
 import networkx as nx
 
 from dev.visualize_snakes import visualize_snakes
-from summary.topologization import Topologization
+from summary.topologization import ReadonlyTopologization
 
 
 def main():
@@ -23,8 +23,8 @@ def main():
 
     print(f"Loading workspace from: {workspace_path}")
 
-    # Load Topologization object
-    topo = Topologization(workspace_path)
+    # Load ReadonlyTopologization object
+    topo = ReadonlyTopologization(workspace_path)
 
     # Get all chapters
     chapter_ids = topo.get_all_chapter_ids()

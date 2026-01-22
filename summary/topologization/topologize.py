@@ -1,19 +1,22 @@
+"""Topologization pipeline: incremental knowledge graph building and snake detection."""
+
 import shutil
 import sqlite3
 from collections.abc import Iterable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .api import Chunk, Graph, Snake
 
 import networkx as nx
 from tiktoken import Encoding
 
 from ..llm import LLM
 from . import database
-from .api import Topologization
 from .chunk_extraction import ChunkExtractor
 from .cognitive_chunk import CognitiveChunk
-from .fragment import FragmentWriter
+from .fragment import FragmentReader, FragmentWriter, SentenceId
 from .fragment_grouping import group_fragments_by_chapter
 from .graph_weights import add_weights_to_graph
 from .snake_detector import SnakeDetector, split_connected_components
@@ -23,137 +26,512 @@ from .wave_reflection import WaveReflection
 from .working_memory import WorkingMemory
 
 
-@dataclass
-class TopologizationConfig:
-    """Configuration for topologization pipeline."""
+class ReadonlyTopologization:
+    """Read-only access to topologization workspace.
 
-    # Processing parameters
-    max_fragment_tokens: int = 800
-    batch_size: int = 50000
-    working_memory_capacity: int = 7
-    generation_decay_factor: float = 0.5
-
-    # Snake detection parameters
-    min_cluster_size: int = 2
-    snake_tokens: int = 700
-
-    # Fragment grouping parameters
-    group_tokens_count: int = 9600  # Maximum tokens per fragment group
-
-
-def topologize(
-    intention: str,
-    input: Iterable[Iterable[tuple[int, str]]],
-    workspace_path: Path,
-    config: TopologizationConfig,
-    llm: LLM,
-    encoding: Encoding,
-) -> Topologization:
-    """Execute topologization pipeline and create workspace.
-
-    Args:
-        intention: User's reading intention/goal
-        input: Iterable of chapters, each chapter is an iterable of (token_count, sentence_text)
-        workspace_path: Directory to store fragments + database
-        config: Pipeline configuration
-        llm: LLM instance for extraction and summarization
-        encoding: Token encoding
-
-    Returns:
-        Topologization object for accessing results
+    Provides query and access methods for reading existing workspace data
+    without modification capabilities.
     """
-    print("=" * 60)
-    print("=== Topologization Pipeline ===")
-    print("=" * 60)
-    print(f"Workspace: {workspace_path}")
-    print(f"Working memory capacity: {config.working_memory_capacity}\n")
 
-    # Step 1: Setup workspace
-    if workspace_path.exists():
-        shutil.rmtree(workspace_path)
-    workspace_path.mkdir(parents=True)
-    (workspace_path / "fragments").mkdir()
+    def __init__(self, workspace_path: Path):
+        """Load existing workspace for read-only access.
 
-    # Step 2: Generate extraction guidance from intention
-    print("\n=== Meta-Prompt: Generating Extraction Guidance ===")
-    extraction_guidance = _generate_extraction_guidance(
-        intention=intention,
-        llm=llm,
-    )
+        Args:
+            workspace_path: Path to workspace directory containing fragments/ and database.db
+        """
+        self.workspace_path = workspace_path
+        self._db_path = workspace_path / "database.db"
 
-    # Step 3: Initialize components
-    fragment_writer = FragmentWriter(workspace_path)
-    fragmenter = TextFragmenter(fragment_writer, encoding, config.max_fragment_tokens)
-    extractor = ChunkExtractor(llm, extraction_guidance)
-    working_memory = WorkingMemory(capacity=config.working_memory_capacity)
-    wave_reflection = WaveReflection(generation_decay_factor=config.generation_decay_factor)
+        # Initialize database connection
+        if not self._db_path.exists():
+            raise FileNotFoundError(f"Database not found: {self._db_path}")
 
-    # Step 4: Extract knowledge graph
-    print("\n=== Phase 1: Knowledge Graph Extraction ===")
-    knowledge_graph, all_chunks = _extract_knowledge_graph(
-        input,
-        fragmenter,
-        extractor,
-        working_memory,
-        wave_reflection,
-    )
+        self._conn = sqlite3.connect(self._db_path)
 
-    # Finalize fragment writing
-    fragmenter.finalize()
+        # Initialize fragment reader
+        self._fragment_reader = FragmentReader(workspace_path)
 
-    print(f"\n{'=' * 60}")
-    print("=== Knowledge Graph Results ===")
-    print(f"{'=' * 60}")
-    print(f"Total chunks: {knowledge_graph.number_of_nodes()}")
-    print(f"Total connections: {knowledge_graph.number_of_edges()}")
+        # Create knowledge graph accessor (lazy-loading from database)
+        from .api import KnowledgeGraph
 
-    # Step 5: Initialize database
-    db_path = workspace_path / "database.db"
-    conn = database.initialize_database(db_path)
+        self.knowledge_graph = KnowledgeGraph(self._conn, self)
 
-    # Step 6: Save chunks and edges to database
-    print("\nSaving knowledge graph to database...")
-    _save_knowledge_graph(conn, knowledge_graph, all_chunks)
+    def get_chunk(self, chunk_id: int) -> "Chunk":
+        """Load chunk from database.
 
-    # Step 6.5: Group fragments by chapter using resource segmentation
-    print(f"\n{'=' * 60}")
-    print("=== Fragment Grouping ===")
-    print(f"{'=' * 60}")
-    print(f"Group token limit: {config.group_tokens_count}")
+        Args:
+            chunk_id: Chunk ID
 
-    fragment_groups = group_fragments_by_chapter(conn, workspace_path, config.group_tokens_count)
-    print(f"\nCreated {len(fragment_groups)} fragment groups:")
-    for group in fragment_groups:
-        print(f"  Chapter {group.chapter_id}, Group {group.group_id}: {len(group.fragment_ids)} fragments")
+        Returns:
+            Chunk object
 
-    # Save fragment groups to database
-    _save_fragment_groups(conn, fragment_groups)
+        Raises:
+            ValueError: If chunk not found
+        """
+        from .api import Chunk
 
-    # Step 7: Detect and analyze snakes within each group
-    print(f"\n{'=' * 60}")
-    print("=== Phase 2: Thematic Chain Detection ===")
-    print(f"{'=' * 60}")
+        cursor = self._conn.execute(
+            (
+                "SELECT id, generation, chapter_id, fragment_id, sentence_index, label, content, "
+                "retention, importance, tokens, weight FROM chunks WHERE id = ?"
+            ),
+            (chunk_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Chunk {chunk_id} not found")
 
-    group_snakes = _analyze_snakes_by_groups(conn, knowledge_graph, fragment_groups, config)
+        return Chunk(
+            id=row[0],
+            generation=row[1],
+            sentence_id=(row[2], row[3], row[4]),
+            label=row[5],
+            content=row[6],
+            retention=row[7],
+            importance=row[8],
+            tokens=row[9],
+            weight=row[10],
+            _topologization=self,
+        )
 
-    # Step 8: Save snakes to database (per group)
-    print("\nSaving snakes to database...")
-    _save_snakes_by_groups(conn, group_snakes, knowledge_graph)
+    def get_snake(self, snake_id: int) -> "Snake":
+        """Load snake from database.
 
-    conn.close()
+        Args:
+            snake_id: Global snake ID
 
-    # Calculate total snakes across all groups
-    total_snakes = sum(len(snakes_list) for snakes_list, _ in group_snakes.values())
+        Returns:
+            Snake object
 
-    print(f"\n{'=' * 60}")
-    print("=== Pipeline Complete ===")
-    print(f"{'=' * 60}")
-    print(f"Total chunks: {len(all_chunks)}")
-    print(f"Total snakes: {total_snakes}")
-    print(f"Workspace: {workspace_path}")
+        Raises:
+            ValueError: If snake not found
+        """
+        from .api import Snake
 
-    # Step 9: Return Topologization object
-    return Topologization(workspace_path)
+        cursor = self._conn.execute(
+            (
+                "SELECT id, chapter_id, group_id, local_snake_id, size, first_label, last_label, tokens, weight "
+                "FROM snakes WHERE id = ?"
+            ),
+            (snake_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Snake {snake_id} not found")
+
+        return Snake(
+            snake_id=row[0],
+            size=row[4],
+            first_label=row[5],
+            last_label=row[6],
+            tokens=row[7],
+            weight=row[8],
+            _topologization=self,
+        )
+
+    def get_all_chapter_ids(self) -> list[int]:
+        """Get list of all chapter IDs.
+
+        Returns:
+            Sorted list of chapter IDs
+        """
+        cursor = self._conn.execute("SELECT DISTINCT chapter_id FROM fragment_groups ORDER BY chapter_id")
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_group_ids_for_chapter(self, chapter_id: int) -> list[int]:
+        """Get list of all group IDs for a specific chapter.
+
+        Args:
+            chapter_id: Chapter ID
+
+        Returns:
+            Sorted list of group IDs
+        """
+        cursor = self._conn.execute(
+            "SELECT DISTINCT group_id FROM fragment_groups WHERE chapter_id = ? ORDER BY group_id",
+            (chapter_id,),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+    def get_snake_graph(self, chapter_id: int, group_id: int) -> "Graph":
+        """Get snake graph for a specific chapter and group.
+
+        Args:
+            chapter_id: Chapter ID
+            group_id: Group ID
+
+        Returns:
+            Snake graph for the specified group
+        """
+        from .api import SnakeGraph
+
+        return SnakeGraph(self._conn, self, chapter_id, group_id)
+
+    def get_sentence_text(self, sentence_id: SentenceId) -> str:
+        """Lazy-load sentence text from fragment.json.
+
+        Args:
+            sentence_id: (chapter_id, fragment_id, sentence_index) tuple
+
+        Returns:
+            Sentence text string
+        """
+        return self._fragment_reader.get_sentence(sentence_id)
+
+    def close(self):
+        """Close database connection."""
+        self._conn.close()
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, *_):
+        """Context manager exit."""
+        self.close()
+
+
+class Topologization(ReadonlyTopologization):
+    """Main class for topologization: building and accessing knowledge graphs.
+
+    Supports two modes:
+    1. Builder mode: Create with __init__, then call load() for each chapter incrementally
+    2. Reader mode: Use from_workspace() to load existing workspace for reading only
+    """
+
+    def __init__(
+        self,
+        intention: str,
+        workspace_path: Path,
+        llm: LLM,
+        encoding: Encoding,
+        max_fragment_tokens: int = 800,
+        working_memory_capacity: int = 7,
+        generation_decay_factor: float = 0.5,
+        min_cluster_size: int = 2,
+        snake_tokens: int = 700,
+        group_tokens_count: int = 9600,
+    ):
+        """Create new Topologization workspace for incremental chapter loading.
+
+        Args:
+            intention: User's reading intention/goal
+            workspace_path: Directory to store fragments + database
+            llm: LLM instance for extraction
+            encoding: Token encoding
+            max_fragment_tokens: Maximum tokens per fragment
+            working_memory_capacity: Number of extra chunks in working memory
+            generation_decay_factor: Decay factor for Wave Reflection
+            min_cluster_size: Minimum snake size
+            snake_tokens: Maximum tokens per snake
+            group_tokens_count: Maximum tokens per fragment group
+        """
+        print("=" * 60)
+        print("=== Initializing Topologization ===")
+        print("=" * 60)
+        print(f"Workspace: {workspace_path}")
+        print(f"Working memory capacity: {working_memory_capacity}\n")
+
+        # Save build parameters
+        self._intention = intention
+        self._llm = llm
+        self._encoding = encoding
+        self._max_fragment_tokens = max_fragment_tokens
+        self._working_memory_capacity = working_memory_capacity
+        self._generation_decay_factor = generation_decay_factor
+        self._min_cluster_size = min_cluster_size
+        self._snake_tokens = snake_tokens
+        self._group_tokens_count = group_tokens_count
+
+        # State variables for building
+        self._next_chapter_id = 0
+        self._next_chunk_id = 0  # Global chunk ID counter
+        self._extraction_guidance: str | None = None  # Lazy-loaded on first load()
+        self._fragment_writer: FragmentWriter
+        self._knowledge_graph_nx: nx.DiGraph
+        self._all_chunks: list[CognitiveChunk] = []
+
+        # Setup workspace
+        self.workspace_path = workspace_path
+        if workspace_path.exists():
+            shutil.rmtree(workspace_path)
+        workspace_path.mkdir(parents=True)
+        (workspace_path / "fragments").mkdir()
+
+        # Initialize database
+        self._db_path = workspace_path / "database.db"
+        self._conn = database.initialize_database(self._db_path)
+
+        # Create persistent components for building
+        self._fragment_writer = FragmentWriter(workspace_path)
+        self._knowledge_graph_nx = nx.DiGraph()
+
+        # Initialize fragment reader
+        self._fragment_reader = FragmentReader(workspace_path)
+
+        # Create knowledge graph accessor (lazy-loading from database)
+        from .api import KnowledgeGraph
+
+        self.knowledge_graph = KnowledgeGraph(self._conn, self)
+
+    def load(self, sentences: Iterable[tuple[int, str]]) -> int:
+        """Load one chapter and return its chapter_id.
+
+        Args:
+            sentences: Iterable of (token_count, sentence_text) for this chapter
+
+        Returns:
+            Chapter ID (auto-incremented)
+        """
+        # Lazy load meta-prompt on first call
+        if self._extraction_guidance is None:
+            print("\n=== Meta-Prompt: Generating Extraction Guidance ===")
+            self._extraction_guidance = _generate_extraction_guidance(self._intention, self._llm)
+
+        # Get chapter ID and increment
+        chapter_id = self._next_chapter_id
+        self._next_chapter_id += 1
+
+        print(f"\n{'=' * 60}")
+        print(f"=== Loading Chapter {chapter_id} ===")
+        print(f"{'=' * 60}")
+
+        # Reset working memory (per-chapter independence)
+        working_memory = WorkingMemory(capacity=self._working_memory_capacity)
+        working_memory._next_id = self._next_chunk_id  # Set starting chunk ID
+        # Note: generation resets to 0 automatically in new WorkingMemory
+
+        # Create components for this chapter
+        wave_reflection = WaveReflection(generation_decay_factor=self._generation_decay_factor)
+        extractor = ChunkExtractor(self._llm, self._extraction_guidance)
+
+        # Start this chapter in fragment writer
+        self._fragment_writer.start_chapter(chapter_id)
+
+        # Extract knowledge graph for this chapter
+        chapter_chunks = self._extract_chapter_knowledge_graph(
+            chapter_id=chapter_id,
+            sentences=sentences,
+            extractor=extractor,
+            working_memory=working_memory,
+            wave_reflection=wave_reflection,
+        )
+
+        # Update next_chunk_id for next chapter
+        self._next_chunk_id = working_memory._next_id
+
+        # Accumulate chunks and graph
+        self._all_chunks.extend(chapter_chunks)
+
+        # Save chunks and edges to database
+        print(f"\nSaving chapter {chapter_id} to database...")
+        _save_knowledge_graph(self._conn, self._knowledge_graph_nx, chapter_chunks)
+
+        # Fragment grouping (only this chapter)
+        print(f"\n{'=' * 60}")
+        print(f"=== Fragment Grouping (Chapter {chapter_id}) ===")
+        print(f"{'=' * 60}")
+        print(f"Group token limit: {self._group_tokens_count}")
+
+        fragment_groups = group_fragments_by_chapter(self._conn, self.workspace_path, self._group_tokens_count)
+
+        # Filter to only this chapter's groups
+        chapter_groups = [g for g in fragment_groups if g.chapter_id == chapter_id]
+        print(f"\nCreated {len(chapter_groups)} fragment groups:")
+        for group in chapter_groups:
+            print(f"  Chapter {group.chapter_id}, Group {group.group_id}: {len(group.fragment_ids)} fragments")
+
+        # Save fragment groups to database
+        _save_fragment_groups(self._conn, chapter_groups)
+
+        # Snake detection (only this chapter)
+        print(f"\n{'=' * 60}")
+        print(f"=== Thematic Chain Detection (Chapter {chapter_id}) ===")
+        print(f"{'=' * 60}")
+
+        # Create config object for snake analysis
+        group_snakes = _analyze_snakes_by_groups(
+            self._conn,
+            self._knowledge_graph_nx,
+            chapter_groups,
+            min_cluster_size=self._min_cluster_size,
+            snake_tokens=self._snake_tokens,
+        )
+
+        # Save snakes to database
+        print("\nSaving snakes to database...")
+        _save_snakes_by_groups(self._conn, group_snakes, self._knowledge_graph_nx)
+
+        # Print chapter summary
+        total_snakes = sum(len(snakes_list) for snakes_list, _ in group_snakes.values())
+        print(f"\n{'=' * 60}")
+        print(f"=== Chapter {chapter_id} Complete ===")
+        print(f"{'=' * 60}")
+        print(f"Chunks: {len(chapter_chunks)}")
+        print(f"Snakes: {total_snakes}")
+
+        return chapter_id
+
+    def _extract_chapter_knowledge_graph(
+        self,
+        chapter_id: int,
+        sentences: Iterable[tuple[int, str]],
+        extractor: ChunkExtractor,
+        working_memory: WorkingMemory,
+        wave_reflection: WaveReflection,
+    ) -> list[CognitiveChunk]:
+        """Extract knowledge graph for a single chapter.
+
+        Args:
+            chapter_id: Chapter ID being processed
+            sentences: Iterable of (token_count, sentence_text) for this chapter
+            extractor: Chunk extractor
+            working_memory: Working memory (fresh for this chapter)
+            wave_reflection: Wave reflection algorithm
+
+        Returns:
+            List of all chunks extracted from this chapter
+        """
+        # Create fragmenter for this chapter (wraps single chapter as iterable)
+        fragmenter = TextFragmenter(self._fragment_writer, self._encoding, self._max_fragment_tokens)
+
+        chapter_chunks: list[CognitiveChunk] = []
+        fragment_count = 0
+
+        # Fragment this chapter's sentences
+        for fragment_with_sentences in fragmenter.stream_fragments([sentences]):
+            fragment_count += 1
+
+            print(f"Processing chapter {chapter_id}, fragment {fragment_count}...")
+
+            # === Stage 1: Extract user-focused chunks ===
+            user_focused_result, fragment_summary = extractor.extract_user_focused(
+                fragment_with_sentences.text,
+                working_memory,
+                fragment_with_sentences.sentence_ids,
+                fragment_with_sentences.sentence_texts,
+                fragment_with_sentences.sentence_token_counts,
+            )
+
+            if user_focused_result is None:
+                print(f"Warning: User-focused extraction failed for chapter {chapter_id}, fragment {fragment_count}")
+                continue
+
+            # Store fragment summary
+            if fragment_summary:
+                self._fragment_writer.set_summary(fragment_summary)
+
+            # Add user-focused chunks to working memory and assign IDs
+            user_focused_chunks, user_focused_edges = working_memory.add_chunks_with_links(user_focused_result)
+
+            # Add user-focused chunks to knowledge graph
+            for chunk in user_focused_chunks:
+                self._knowledge_graph_nx.add_node(
+                    chunk.id,
+                    generation=chunk.generation,
+                    sentence_id=chunk.sentence_id,
+                    label=chunk.label,
+                    content=chunk.content,
+                    retention=chunk.retention,
+                    importance=chunk.importance,
+                    tokens=chunk.tokens,
+                )
+
+            # Add user-focused edges to knowledge graph with strength
+            for from_id, to_id in user_focused_edges:
+                strength = _find_edge_strength(
+                    user_focused_result.links, from_id, to_id, user_focused_chunks, user_focused_result.temp_ids
+                )
+                self._knowledge_graph_nx.add_edge(from_id, to_id, strength=strength)
+
+            chapter_chunks.extend(user_focused_chunks)
+
+            # === Stage 2: Extract book-coherence chunks ===
+            book_coherence_result = extractor.extract_book_coherence(
+                fragment_with_sentences.text,
+                working_memory,
+                user_focused_chunks,
+                fragment_with_sentences.sentence_ids,
+                fragment_with_sentences.sentence_texts,
+                fragment_with_sentences.sentence_token_counts,
+            )
+
+            if book_coherence_result is not None and book_coherence_result.chunks:
+                # Process importance_annotations: update Stage 1 chunks with importance
+                if book_coherence_result.importance_annotations:
+                    for annotation in book_coherence_result.importance_annotations:
+                        chunk_id = annotation.get("chunk_id")
+                        importance = annotation.get("importance")
+
+                        # Find the chunk in user_focused_chunks and update its importance
+                        for chunk in user_focused_chunks:
+                            if chunk.id == chunk_id:
+                                chunk.importance = importance
+                                break
+
+                # Add book-coherence chunks to working memory and assign IDs
+                book_coherence_chunks, book_coherence_edges = working_memory.add_chunks_with_links(
+                    book_coherence_result
+                )
+
+                # Add book-coherence chunks to knowledge graph
+                for chunk in book_coherence_chunks:
+                    self._knowledge_graph_nx.add_node(
+                        chunk.id,
+                        generation=chunk.generation,
+                        sentence_id=chunk.sentence_id,
+                        label=chunk.label,
+                        content=chunk.content,
+                        retention=chunk.retention,
+                        importance=chunk.importance,
+                        tokens=chunk.tokens,
+                    )
+
+                # Add book-coherence edges to knowledge graph with strength
+                for from_id, to_id in book_coherence_edges:
+                    strength = _find_edge_strength(
+                        book_coherence_result.links,
+                        from_id,
+                        to_id,
+                        book_coherence_chunks,
+                        book_coherence_result.temp_ids,
+                    )
+                    self._knowledge_graph_nx.add_edge(from_id, to_id, strength=strength)
+
+                chapter_chunks.extend(book_coherence_chunks)
+
+            # === Update working memory with wave reflection ===
+            # Get all chunks from current fragment (both stages)
+            current_fragment_chunk_ids = [c.id for c in working_memory.get_all_chunks_for_saving()]
+
+            # Select extra chunks from history using wave reflection
+            # Note: Only select from chunks within this chapter (chapter independence)
+            extra_chunks = wave_reflection.select_top_chunks(
+                all_chunks=chapter_chunks,  # Only this chapter's chunks
+                knowledge_graph=self._knowledge_graph_nx,
+                latest_chunk_ids=current_fragment_chunk_ids,
+                capacity=working_memory.capacity,
+            )
+
+            # Set extra chunks and finalize fragment
+            working_memory.set_extra_chunks(extra_chunks)
+            working_memory.finalize_fragment()
+
+        # Finalize fragment writing for this chapter
+        fragmenter.finalize()
+
+        # Compute and add weights to knowledge graph for this chapter's chunks
+        print(f"\nComputing node and edge weights for chapter {chapter_id}...")
+        add_weights_to_graph(self._knowledge_graph_nx)
+
+        print(f"\nChapter {chapter_id} extraction complete:")
+        print(f"  Chunks: {len(chapter_chunks)}")
+        print(f"  Fragments processed: {fragment_count}")
+
+        return chapter_chunks
+
+
+# ===== Internal helper functions =====
 
 
 def _generate_extraction_guidance(
@@ -199,149 +577,6 @@ def _generate_extraction_guidance(
 
     print(f"✓ Extraction guidance generated ({len(guidance)} characters)")
     return guidance
-
-
-def _extract_knowledge_graph(
-    input: Iterable[Iterable[tuple[int, str]]],
-    fragmenter: TextFragmenter,
-    extractor: ChunkExtractor,
-    working_memory: WorkingMemory,
-    wave_reflection: WaveReflection,
-) -> tuple[nx.DiGraph, list[CognitiveChunk]]:
-    """Extract knowledge graph from input with two-stage extraction.
-
-    Args:
-        input: Iterable of chapters, each chapter is an iterable of (token_count, sentence_text)
-        fragmenter: Text fragmenter
-        extractor: Chunk extractor
-        working_memory: Working memory
-        wave_reflection: Wave reflection
-
-    Returns:
-        Tuple of (knowledge_graph, all_chunks)
-    """
-    knowledge_graph = nx.DiGraph()
-    all_chunks: list[CognitiveChunk] = []
-    chunk_count = 0
-
-    for fragment_with_sentences in fragmenter.stream_fragments(input):
-        chunk_count += 1
-
-        print(f"Processing fragment {chunk_count}...")
-
-        # === Stage 1: Extract user-focused chunks ===
-        user_focused_result, fragment_summary = extractor.extract_user_focused(
-            fragment_with_sentences.text,
-            working_memory,
-            fragment_with_sentences.sentence_ids,
-            fragment_with_sentences.sentence_texts,
-            fragment_with_sentences.sentence_token_counts,
-        )
-
-        if user_focused_result is None:
-            print(f"Warning: User-focused extraction failed for fragment {chunk_count}")
-            continue
-
-        # Store fragment summary (will be written when fragment is ended)
-        if fragment_summary:
-            fragmenter.fragment_writer.set_summary(fragment_summary)
-
-        # Add user-focused chunks to working memory and assign IDs
-        user_focused_chunks, user_focused_edges = working_memory.add_chunks_with_links(user_focused_result)
-
-        # Add user-focused chunks to knowledge graph
-        for chunk in user_focused_chunks:
-            knowledge_graph.add_node(
-                chunk.id,
-                generation=chunk.generation,
-                sentence_id=chunk.sentence_id,
-                label=chunk.label,
-                content=chunk.content,
-                retention=chunk.retention,
-                importance=chunk.importance,
-                tokens=chunk.tokens,
-            )
-
-        # Add user-focused edges to knowledge graph with strength
-        for from_id, to_id in user_focused_edges:
-            strength = _find_edge_strength(
-                user_focused_result.links, from_id, to_id, user_focused_chunks, user_focused_result.temp_ids
-            )
-            knowledge_graph.add_edge(from_id, to_id, strength=strength)
-
-        all_chunks.extend(user_focused_chunks)
-
-        # === Stage 2: Extract book-coherence chunks ===
-        book_coherence_result = extractor.extract_book_coherence(
-            fragment_with_sentences.text,
-            working_memory,
-            user_focused_chunks,
-            fragment_with_sentences.sentence_ids,
-            fragment_with_sentences.sentence_texts,
-            fragment_with_sentences.sentence_token_counts,
-        )
-
-        if book_coherence_result is not None and book_coherence_result.chunks:
-            # Process importance_annotations: update Stage 1 chunks with importance
-            if book_coherence_result.importance_annotations:
-                for annotation in book_coherence_result.importance_annotations:
-                    chunk_id = annotation.get("chunk_id")
-                    importance = annotation.get("importance")
-
-                    # Find the chunk in user_focused_chunks and update its importance
-                    for chunk in user_focused_chunks:
-                        if chunk.id == chunk_id:
-                            chunk.importance = importance
-                            break
-
-            # Add book-coherence chunks to working memory and assign IDs
-            book_coherence_chunks, book_coherence_edges = working_memory.add_chunks_with_links(book_coherence_result)
-
-            # Add book-coherence chunks to knowledge graph
-            for chunk in book_coherence_chunks:
-                knowledge_graph.add_node(
-                    chunk.id,
-                    generation=chunk.generation,
-                    sentence_id=chunk.sentence_id,
-                    label=chunk.label,
-                    content=chunk.content,
-                    retention=chunk.retention,
-                    importance=chunk.importance,
-                    tokens=chunk.tokens,
-                )
-
-            # Add book-coherence edges to knowledge graph with strength
-            # Note: Only pass book_coherence chunks/temp_ids, since user_focused chunks
-            # are already referenced by integer IDs in the links
-            for from_id, to_id in book_coherence_edges:
-                strength = _find_edge_strength(
-                    book_coherence_result.links, from_id, to_id, book_coherence_chunks, book_coherence_result.temp_ids
-                )
-                knowledge_graph.add_edge(from_id, to_id, strength=strength)
-
-            all_chunks.extend(book_coherence_chunks)
-
-        # === Update working memory with wave reflection ===
-        # Get all chunks from current fragment (both stages)
-        current_fragment_chunk_ids = [c.id for c in working_memory.get_all_chunks_for_saving()]
-
-        # Select extra chunks from history using wave reflection
-        extra_chunks = wave_reflection.select_top_chunks(
-            all_chunks=all_chunks,
-            knowledge_graph=knowledge_graph,
-            latest_chunk_ids=current_fragment_chunk_ids,
-            capacity=working_memory.capacity,
-        )
-
-        # Set extra chunks and finalize fragment
-        working_memory.set_extra_chunks(extra_chunks)
-        working_memory.finalize_fragment()
-
-    # Compute and add weights to knowledge graph
-    print("\nComputing node and edge weights...")
-    add_weights_to_graph(knowledge_graph)
-
-    return knowledge_graph, all_chunks
 
 
 def _save_knowledge_graph(
@@ -413,7 +648,8 @@ def _analyze_snakes_by_groups(
     conn: sqlite3.Connection,
     knowledge_graph: nx.DiGraph,
     fragment_groups: list,
-    config: TopologizationConfig,
+    min_cluster_size: int,
+    snake_tokens: int,
 ) -> dict[tuple[int, int], tuple[list[list[int]], nx.DiGraph]]:
     """Detect snakes within each fragment group independently.
 
@@ -421,7 +657,8 @@ def _analyze_snakes_by_groups(
         conn: Database connection
         knowledge_graph: Full knowledge graph
         fragment_groups: List of GroupInfo objects
-        config: Pipeline configuration
+        min_cluster_size: Minimum cluster size for snake detection
+        snake_tokens: Maximum tokens per snake
 
     Returns:
         Dict mapping (chapter_id, group_id) to (snakes, snake_graph) tuples
@@ -472,8 +709,8 @@ def _analyze_snakes_by_groups(
 
         # Detect snakes in each component
         detector = SnakeDetector(
-            min_cluster_size=config.min_cluster_size,
-            snake_tokens=config.snake_tokens,
+            min_cluster_size=min_cluster_size,
+            snake_tokens=snake_tokens,
         )
 
         all_snakes = []
@@ -592,94 +829,6 @@ def _save_snakes_by_groups(
                 )
 
     conn.commit()
-
-
-def _analyze_snakes(knowledge_graph: nx.DiGraph, config: TopologizationConfig) -> tuple[list[list[int]], nx.DiGraph]:
-    # Split into connected components
-    print("\nSplitting into connected components...")
-    components = split_connected_components(knowledge_graph)
-    print(f"Found {len(components)} connected component(s):")
-    for i, comp in enumerate(components):
-        print(f"  Component {i}: {len(comp.nodes())} nodes, {len(comp.edges())} edges")
-
-    # Detect snakes in each component
-    print("\nDetecting thematic chains (snakes)...")
-    detector = SnakeDetector(
-        min_cluster_size=config.min_cluster_size,
-        snake_tokens=config.snake_tokens,
-    )
-
-    all_snakes = []
-    for i, component in enumerate(components):
-        print(f"\nProcessing Component {i}:")
-        component_snakes = detector.detect_snakes(component)
-        all_snakes.extend(component_snakes)
-
-    if not all_snakes:
-        print("No snakes detected")
-        return [], nx.DiGraph()
-
-    print(f"\nFound {len(all_snakes)} snakes")
-
-    # Build snake graph
-    print(f"\n{'=' * 60}")
-    print("=== Building Snake Graph ===")
-    print(f"{'=' * 60}")
-
-    builder = SnakeGraphBuilder()
-    snake_graph = builder.build_snake_graph(all_snakes, knowledge_graph)
-
-    print(f"Snake graph: {len(snake_graph.nodes())} snakes, {len(snake_graph.edges())} inter-snake edges")
-
-    return all_snakes, snake_graph
-
-
-def _save_snakes(
-    conn: sqlite3.Connection,
-    snakes: list[list[int]],
-    snake_graph: nx.DiGraph,
-    knowledge_graph: nx.DiGraph,
-):
-    """Save snakes to database.
-
-    Args:
-        conn: Database connection
-        snakes: List of snakes
-        snake_graph: Snake graph
-        knowledge_graph: Knowledge graph (for node attributes)
-    """
-    # Save snakes
-    for snake_id, snake in enumerate(snakes):
-        first_node = knowledge_graph.nodes[snake[0]]
-        last_node = knowledge_graph.nodes[snake[-1]]
-
-        # Calculate total tokens and weight for this snake
-        total_tokens = sum(knowledge_graph.nodes[chunk_id].get("tokens", 0) for chunk_id in snake)
-        total_weight = sum(knowledge_graph.nodes[chunk_id].get("weight", 0.0) for chunk_id in snake)
-
-        database.insert_snake(
-            conn,
-            snake_id,
-            len(snake),
-            first_node["label"],
-            last_node["label"],
-            tokens=total_tokens,
-            weight=total_weight,
-        )
-
-        # Save snake-chunk associations
-        for position, chunk_id in enumerate(snake):
-            database.insert_snake_chunk(conn, snake_id, chunk_id, position)
-
-    # Save snake edges
-    for from_snake, to_snake in snake_graph.edges():
-        edge_data = snake_graph.edges[from_snake, to_snake]
-        database.insert_snake_edge(
-            conn,
-            from_snake,
-            to_snake,
-            edge_data["weight"],
-        )
 
 
 def _find_edge_strength(

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from summary.topologization import Topologization
+from summary.topologization import ReadonlyTopologization
 
 
 def analyze_retention_distribution():
@@ -19,8 +19,8 @@ def analyze_retention_distribution():
 
     print(f"Loading workspace from: {workspace_path}")
 
-    # Load Topologization object
-    topo = Topologization(workspace_path)
+    # Load ReadonlyTopologization object
+    topo = ReadonlyTopologization(workspace_path)
 
     # Get all chapters
     chapter_ids = topo.get_all_chapter_ids()

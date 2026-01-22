@@ -1,13 +1,12 @@
-from .api import Chunk, ChunkEdge, Snake, SnakeEdge, Topologization
+from .api import Chunk, ChunkEdge, Snake, SnakeEdge
 from .enums import ImportanceLevel, LinkStrength, RetentionLevel
 from .fragment import SentenceId
-from .topologize import TopologizationConfig, topologize
+from .topologize import ReadonlyTopologization, Topologization
 
 __all__ = [
     # Main API
-    "topologize",
+    "ReadonlyTopologization",
     "Topologization",
-    "TopologizationConfig",
     # Data types
     "Chunk",
     "ChunkEdge",

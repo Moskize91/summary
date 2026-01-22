@@ -9,7 +9,7 @@ from tiktoken import get_encoding
 from .editor import compress_text
 from .epub import read_epub_sentences, write_epub
 from .llm import LLM
-from .topologization import TopologizationConfig, topologize
+from .topologization import Topologization
 
 
 def main(args: list[str] | None = None) -> int:
@@ -138,61 +138,55 @@ def main(args: list[str] | None = None) -> int:
         cache_dir_path=cache_dir,
     )
 
-    # Create pipeline configuration
-    config = TopologizationConfig(
-        max_fragment_tokens=parsed_args.fragment_tokens,
-        working_memory_capacity=parsed_args.memory_capacity,
-        generation_decay_factor=parsed_args.decay_factor,
-        min_cluster_size=parsed_args.min_snake_size,
-        snake_tokens=parsed_args.snake_tokens,
-    )
-
     try:
         intention: str = (
             "压缩此书，重点关注别人对朱元璋的看法，别人怎么对待朱元璋，以及朱元璋被他人以不同态度对待的反应。"
             "对于他人第一次见朱元璋的评价、反应、表情，必须一字不漏地原文保留。社会背景方面可以压缩和删节。"
         )
 
-        # Prepare input: read EPUB and extract sentences
+        # Prepare encoding
         encoding = get_encoding("o200k_base")
         print(f"Processing input EPUB: {parsed_args.input_file}")
 
-        # Read EPUB and collect chapter data
-        chapter_titles = []
-        input_data = []
-
-        for chapter_title, chapter_sentences in read_epub_sentences(parsed_args.input_file, encoding):
-            chapter_titles.append(chapter_title)
-            sentences_list = list(chapter_sentences)
-            input_data.append(sentences_list)
-            print(f"  Chapter: {chapter_title} ({len(sentences_list)} sentences)")
-
-        print(f"Total chapters: {len(input_data)}")
-
-        # Run topologization
-        topologization = topologize(
+        # Create Topologization instance
+        topologization = Topologization(
             intention=intention,
-            input=input_data,
             workspace_path=parsed_args.workspace,
-            config=config,
             llm=llm,
             encoding=encoding,
+            max_fragment_tokens=parsed_args.fragment_tokens,
+            working_memory_capacity=parsed_args.memory_capacity,
+            generation_decay_factor=parsed_args.decay_factor,
+            min_cluster_size=parsed_args.min_snake_size,
+            snake_tokens=parsed_args.snake_tokens,
         )
+
+        # Read EPUB and incrementally load chapters
+        chapter_info = []  # List of (chapter_id, chapter_title)
+
+        for chapter_title, chapter_sentences in read_epub_sentences(parsed_args.input_file, encoding):
+            sentences_list = list(chapter_sentences)
+            print(f"  Loading: {chapter_title} ({len(sentences_list)} sentences)")
+
+            # Load chapter and get its ID
+            chapter_id = topologization.load(sentences_list)
+            chapter_info.append((chapter_id, chapter_title))
+
+        print(f"Total chapters loaded: {len(chapter_info)}")
 
         # Run compression for each chapter and group
         print("\n" + "=" * 60)
         print("=== Compression Stage ===")
         print("=" * 60)
 
-        all_chapter_ids = topologization.get_all_chapter_ids()
-        print(f"\nFound {len(all_chapter_ids)} chapters to compress")
+        print(f"\nFound {len(chapter_info)} chapters to compress")
 
         # Collect compressed chapters for EPUB output
         compressed_chapters = []
 
-        for chapter_id in all_chapter_ids:
+        for chapter_id, chapter_title in chapter_info:
             group_ids = topologization.get_group_ids_for_chapter(chapter_id)
-            print(f"\nChapter {chapter_id}: {chapter_titles[chapter_id]}")
+            print(f"\nChapter {chapter_id}: {chapter_title}")
             print(f"  Groups: {len(group_ids)}")
 
             # Compress all groups in this chapter
@@ -219,7 +213,7 @@ def main(args: list[str] | None = None) -> int:
 
             # Merge all groups in this chapter with double newlines
             full_chapter_text = "\n\n".join(chapter_compressed_texts)
-            compressed_chapters.append((chapter_titles[chapter_id], [full_chapter_text]))
+            compressed_chapters.append((chapter_title, [full_chapter_text]))
 
         # Write output EPUB
         print("\n" + "=" * 60)

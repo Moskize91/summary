@@ -1,17 +1,20 @@
 """Public API for accessing topologization results from workspace."""
 # pylint: disable=protected-access
-# Note: Chunk and Snake classes intentionally access Topologization's protected members
+# Note: Chunk and Snake classes intentionally access ReadonlyTopologization's protected members
 # for lazy-loading data from the database. This is a friend-class design pattern.
 
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import networkx as nx
 
-from .fragment import FragmentReader, SentenceId
+from .fragment import SentenceId
 from .graph import Graph
+
+if TYPE_CHECKING:
+    from .topologize import ReadonlyTopologization
 
 
 @dataclass
@@ -58,7 +61,7 @@ class Chunk:
     sentence_id: SentenceId  # Primary sentence ID for ordering
     label: str
     content: str  # AI-generated summary content
-    _topologization: "Topologization"  # Reference for lazy loading
+    _topologization: "ReadonlyTopologization"  # Reference for lazy loading
     retention: str | None = None  # verbatim/detailed/focused/relevant
     importance: str | None = None  # critical/important/helpful
     tokens: int = 0  # Total token count of original source sentences
@@ -137,7 +140,7 @@ class Snake:
     size: int
     first_label: str
     last_label: str
-    _topologization: "Topologization"
+    _topologization: "ReadonlyTopologization"
     tokens: int = 0  # Total tokens in snake (sum of chunk tokens)
     weight: float = 0.0  # Total weight of snake (sum of chunk weights)
     _chunk_ids: list[int] | None = field(default=None, repr=False)  # Lazy-loaded
@@ -212,12 +215,12 @@ class KnowledgeGraph(Graph[Chunk, ChunkEdge]):
     Implements the Graph protocol for chunk-level knowledge graph.
     """
 
-    def __init__(self, conn: sqlite3.Connection, topologization: "Topologization"):
+    def __init__(self, conn: sqlite3.Connection, topologization: "ReadonlyTopologization"):
         """Initialize knowledge graph.
 
         Args:
             conn: SQLite database connection
-            topologization: Parent Topologization instance
+            topologization: Parent ReadonlyTopologization instance
         """
         self._conn = conn
         self._topologization = topologization
@@ -307,7 +310,7 @@ class SnakeGraph(Graph[Snake, SnakeEdge]):
     def __init__(
         self,
         conn: sqlite3.Connection,
-        topologization: "Topologization",
+        topologization: "ReadonlyTopologization",
         chapter_id: int,
         group_id: int,
     ):
@@ -315,7 +318,7 @@ class SnakeGraph(Graph[Snake, SnakeEdge]):
 
         Args:
             conn: SQLite database connection
-            topologization: Parent Topologization instance
+            topologization: Parent ReadonlyTopologization instance
             chapter_id: Chapter ID to filter snakes
             group_id: Group ID to filter snakes
         """
@@ -408,163 +411,3 @@ class SnakeGraph(Graph[Snake, SnakeEdge]):
             g.add_edge(from_id, to_id, weight=weight)
 
         return g
-
-
-class Topologization:
-    """Main API for accessing topologization results from workspace.
-
-    Provides access to knowledge graph and snake graph with lazy-loading.
-    """
-
-    def __init__(self, workspace_path: Path):
-        """Load topologization from existing workspace.
-
-        Args:
-            workspace_path: Path to workspace directory containing fragments/ and database.db
-        """
-        self.workspace_path = workspace_path
-        self._db_path = workspace_path / "database.db"
-
-        # Initialize database connection
-        if not self._db_path.exists():
-            raise FileNotFoundError(f"Database not found: {self._db_path}")
-
-        self._conn = sqlite3.connect(self._db_path)
-
-        # Initialize fragment reader
-        self._fragment_reader = FragmentReader(workspace_path)
-
-        # Create graph objects (implement Graph protocol)
-        self.knowledge_graph: Graph[Chunk, ChunkEdge] = KnowledgeGraph(self._conn, self)
-        # Note: snake_graph is now accessed per-group via get_snake_graph(chapter_id, group_id)
-
-    def get_sentence_text(self, sentence_id: SentenceId) -> str:
-        """Lazy-load sentence text from fragment.json.
-
-        Args:
-            sentence_id: (fragment_id, sentence_index) tuple
-
-        Returns:
-            Sentence text string
-        """
-        return self._fragment_reader.get_sentence(sentence_id)
-
-    def get_chunk(self, chunk_id: int) -> Chunk:
-        """Load chunk from database with lazy-loaded content.
-
-        Args:
-            chunk_id: Chunk ID
-
-        Returns:
-            Chunk object
-
-        Raises:
-            ValueError: If chunk not found
-        """
-        cursor = self._conn.execute(
-            (
-                "SELECT id, generation, chapter_id, fragment_id, sentence_index, label, "
-                "content, retention, importance, tokens, weight"
-                " FROM chunks WHERE id = ?"
-            ),
-            (chunk_id,),
-        )
-        row = cursor.fetchone()
-        if not row:
-            raise ValueError(f"Chunk {chunk_id} not found")
-
-        return Chunk(
-            id=row[0],
-            generation=row[1],
-            sentence_id=(row[2], row[3], row[4]),
-            label=row[5],
-            content=row[6],
-            retention=row[7],
-            importance=row[8],
-            tokens=row[9],
-            weight=row[10],
-            _topologization=self,
-        )
-
-    def get_snake(self, snake_id: int) -> Snake:
-        """Load snake from database.
-
-        Args:
-            snake_id: Global snake ID
-
-        Returns:
-            Snake object
-
-        Raises:
-            ValueError: If snake not found
-        """
-        cursor = self._conn.execute(
-            (
-                "SELECT id, chapter_id, group_id, local_snake_id, size, first_label, last_label, tokens, weight "
-                "FROM snakes WHERE id = ?"
-            ),
-            (snake_id,),
-        )
-        row = cursor.fetchone()
-        if not row:
-            raise ValueError(f"Snake {snake_id} not found")
-
-        return Snake(
-            snake_id=row[0],
-            size=row[4],
-            first_label=row[5],
-            last_label=row[6],
-            tokens=row[7],
-            weight=row[8],
-            _topologization=self,
-        )
-
-    def get_all_chapter_ids(self) -> list[int]:
-        """Get list of all chapter IDs.
-
-        Returns:
-            Sorted list of chapter IDs
-        """
-        cursor = self._conn.execute(
-            "SELECT DISTINCT chapter_id FROM fragment_groups ORDER BY chapter_id"
-        )
-        return [row[0] for row in cursor.fetchall()]
-
-    def get_group_ids_for_chapter(self, chapter_id: int) -> list[int]:
-        """Get list of all group IDs for a specific chapter.
-
-        Args:
-            chapter_id: Chapter ID
-
-        Returns:
-            Sorted list of group IDs
-        """
-        cursor = self._conn.execute(
-            "SELECT DISTINCT group_id FROM fragment_groups WHERE chapter_id = ? ORDER BY group_id",
-            (chapter_id,),
-        )
-        return [row[0] for row in cursor.fetchall()]
-
-    def get_snake_graph(self, chapter_id: int, group_id: int) -> Graph[Snake, SnakeEdge]:
-        """Get snake graph for a specific chapter and group.
-
-        Args:
-            chapter_id: Chapter ID
-            group_id: Group ID
-
-        Returns:
-            Snake graph for the specified group
-        """
-        return SnakeGraph(self._conn, self, chapter_id, group_id)
-
-    def close(self):
-        """Close database connection."""
-        self._conn.close()
-
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, *args):
-        """Context manager exit."""
-        self.close()
